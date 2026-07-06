@@ -104,6 +104,11 @@ Canlı karşılaştırma paneli (`/panel`) teslim edildi; kullanıcı iki kamera
 fazlaları bitti. Not: şerit ÇİZGİLERİNDEN otomatik türetilen çokgenler ölçümde zararlıydı (çıkışta
 recall çöküşü) → elle çizim doğru yol. Gap (g) örneği yine görüldü (25AFM687→681, tek düşük-güven varyant).
 
+**İkinci canlı pencere (30 dk, 17:10-17:40):** kamera 26 kayıt; 13'ü cadde-geçişi imzalı (2 kamera
+≤20 sn — kapıya gelmeyen akşam trafiği). **Kapı trafiğinde: 13/13 birebir (%100), kaçan 0, fazla 4**
+(hepsi varyant-kopyası, gap-f). Derin-testte "kaçan" görünen 25AFK950 bu kez kapıdan girdi ve birebir
+okundu — cadde-geçişi sınıflandırmasını doğrular. Bariyer kapsamında kamera-parity bu pencerede TAM.
+
 ## 6. Ekler
 
 ### 6.1 Metodoloji dersleri (tekrar-üretilebilirlik için)
