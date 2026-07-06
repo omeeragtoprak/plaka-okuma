@@ -96,6 +96,14 @@ rapor).
 re-fine-tune → `regression.sh` kapısı (tüm setlerde gerileme yoksa yayınla) → koşul tablosu güncelle.
 Kış gelmeden kar/yağış verisi toplamak **kritik**.
 
+## 5b. Güncelleme (2026-07-06 akşamı): Panel + ROI sahada
+
+Canlı karşılaştırma paneli (`/panel`) teslim edildi; kullanıcı iki kameraya da kapı-koridoru ROI'si
+çizdi (yalnız BİZİM yazılımın filtresi; kameraya yazılmaz). İlk canlı pencere (10 dk, 5 araç):
+**yakalama 5/5, birebir 4/5, gürültü 0** — gap (e) "kapsam farkı" ROI ile sahada kapandı; park-araç
+fazlaları bitti. Not: şerit ÇİZGİLERİNDEN otomatik türetilen çokgenler ölçümde zararlıydı (çıkışta
+recall çöküşü) → elle çizim doğru yol. Gap (g) örneği yine görüldü (25AFM687→681, tek düşük-güven varyant).
+
 ## 6. Ekler
 
 ### 6.1 Metodoloji dersleri (tekrar-üretilebilirlik için)
