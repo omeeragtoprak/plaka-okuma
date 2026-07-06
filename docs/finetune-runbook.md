@@ -88,6 +88,13 @@ Export tuzakları (ölçüldü): torch-backend export bu mimaride ÇALIŞMAZ ("k
 **TF backend + `--no-simplify` şart** (onnxslim MultiHeadAttention Gemm bias'ını bozuyor);
 `--no-dynamic-batch` (C# zaten batch=1); tf2onnx IR 8 üretiyor (patch gerekmedi).
 
+## Re-tune denemesi 2 (2026-07-06): TERFİ YOK — politika rafinasyonu
+
+Veri 2.4×'e çıkınca (2570 kırpıntı/174 plaka; ağırlıkla aynı-koşul gündüz + müdavim plakalar) yeniden
+eğitim denendi: yeni val'de (421 kırpıntı) erz %79.8 vs erz2 %79.6 → **berabere, terfi edilmedi**.
+Ders: hacim değil KOŞUL çeşitliliği kazandırıyor. **Politika: re-tune'u eksik-koşul verisi tetikler**
+(gece / kış-kar / sabah-güneşi kırpıntıları anlamlı birikince), salt etiket sayısı değil.
+
 ## Pilot doğrulaması (2026-07-03, hat uçtan uca ÇALIŞIYOR)
 
 - 633 etiket / 67 plaka ile 2-epoch pilot: eğitim Mac CPU'da ~10-40 sn/epoch (30 epoch = dakikalar).
