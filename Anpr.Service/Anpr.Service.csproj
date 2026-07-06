@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Allow running on a machine that only has the .NET 9 runtime installed
+         (this dev Mac). On the Windows target with the .NET 8 runtime it just
+         runs as a normal net8.0 app. -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Anpr.Core\Anpr.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Copy the shared ONNX models + configs into the service output so the
+       default relative model paths in appsettings resolve at runtime. -->
+  <ItemGroup>
+    <None Include="..\models\*.onnx;..\models\*.yaml"
+          Link="models\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

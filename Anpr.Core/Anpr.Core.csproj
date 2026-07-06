@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <!-- CPU-only ANPR core. Görüntü işleme: SkiaSharp (MIT lisanslı, ücretsiz; ticari/kamu
+         kullanımına uygun) + ONNX Runtime (CPU). SkiaSharp temel paketi osx-arm64 ve win-x64
+         native binary'lerini içerir; bu Mac'te de Windows hedefte de çalışır.
+         OpenCvSharp KULLANILMADI (arm64-macOS için resmi native runtime yok). -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+    <PackageReference Include="SkiaSharp" Version="2.88.8" />
+    <PackageReference Include="YamlDotNet" Version="16.2.1" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,27 @@
+# Build çıktıları
+bin/
+obj/
+*.user
+
+# GERÇEK kimlik bilgileri içeren config — ASLA commit etme.
+# Şablon için appsettings.example.json kullanın.
+**/appsettings.json
+**/appsettings.Development.json
+**/appsettings.Production.json
+**/appsettings.Local.json
+
+# Rider/VS
+.idea/
+.vs/
+*.suo
+
+# macOS
+.DS_Store
+
+# ffmpeg test/geçici çıktıları
+*.tmp
+frames_debug/
+
+# Benchmark veri setleri (büyük; commit edilmez). labels.json elle saklanabilir.
+dataset/
+bench_out/
