@@ -20,6 +20,13 @@ public sealed class AnprOptions
     public int OnnxIntraOpThreads { get; set; } = 2;
 
     /// <summary>
+    /// ONNX thread'leri iş beklerken dönerek (spin) mi beklesin? Spin = kare-başı en düşük gecikme ama
+    /// BOŞTA da CPU yakar. Uyarlanabilir-fps ile çoğu zaman boşta olan zayıf PC'lerde false önerilir
+    /// (boşta CPU ~0'a iner; kare-başı gecikme birkaç ms artabilir). Ölçerek karar verin.
+    /// </summary>
+    public bool OnnxAllowSpinning { get; set; } = true;
+
+    /// <summary>
     /// OCR'ın çalıştırılacağı minimum dedektör güven skoru. Bunun altındaki tespitlere OCR uygulanmaz.
     /// </summary>
     public float MinConfidence { get; set; } = 0.5f;
@@ -63,6 +70,8 @@ public sealed class AnprOptions
             IntraOpNumThreads = Math.Max(1, OnnxIntraOpThreads),
             InterOpNumThreads = 1,
         };
+        // Boşta CPU tasarrufu: spin kapalıyken thread'ler işi kuyruktan bekler (boşta ~0 CPU).
+        so.AddSessionConfigEntry("session.intra_op.allow_spinning", OnnxAllowSpinning ? "1" : "0");
         return so;
     }
 }

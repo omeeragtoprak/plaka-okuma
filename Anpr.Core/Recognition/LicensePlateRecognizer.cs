@@ -119,7 +119,6 @@ public sealed class LicensePlateRecognizer : IDisposable
         int vocab = _config.Alphabet.Length;
 
         var chars = new char[slots];
-        var slotPreds = new SlotPrediction[slots];
 
         float sumNonPad = 0f;
         int countNonPad = 0;
@@ -139,7 +138,6 @@ public sealed class LicensePlateRecognizer : IDisposable
 
             char ch = _config.Alphabet[bestIdx];
             chars[t] = ch;
-            slotPreds[t] = new SlotPrediction(ch, max);
 
             if (ch != padChar)
             {
@@ -151,7 +149,11 @@ public sealed class LicensePlateRecognizer : IDisposable
         string text = new string(chars).Replace(_config.PadChar, string.Empty).Trim();
         float meanConf = countNonPad > 0 ? sumNonPad / countNonPad : 0f;
 
-        return new PlateOcrResult(text, meanConf, slotPreds);
+        // Tam slot×vocab dağılımını (kopya) dışa ver: oylama + gramer-kısıtlı çözümleme için.
+        var slotProbs = new float[slots * vocab];
+        Array.Copy(probs, slotProbs, Math.Min(probs.Length, slotProbs.Length));
+
+        return new PlateOcrResult(text, meanConf, slotProbs, _config.Alphabet);
     }
 
     public void Dispose()

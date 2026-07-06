@@ -7,9 +7,12 @@ public sealed class AnprServiceOptions
 
     /// <summary>
     /// Aktif (araç varken) saniyede işlenecek kare sayısı. ffmpeg de bu hızda kare üretir.
-    /// Daha yüksek fps = araç başına daha çok örnek = daha iyi karakter oylaması. Zayıf CPU'da 3-4 makul.
+    /// ÖLÇÜM (2026-07-02, kamera karşılaştırması): fps artırmak recall'i KURTARMIYOR (kaçan araçlar
+    /// kaynak-yakalama/OCR limiti, işlem fps'i değil) ama gürültüyü SERT artırıyor (precision 57→28%) ve
+    /// zayıf CPU'yu boğuyor. Bariyerde araç 3-8 sn durduğu için 2 fps bile 6-16 kare = yeterli oylama.
+    /// → Zayıf ofis PC için varsayılan 2 (güvenli); güçlü PC'de (AVX2/4-çekirdek) ölçerek 3-4'e çıkılabilir.
     /// </summary>
-    public double Fps { get; set; } = 4;
+    public double Fps { get; set; } = 2;
 
     /// <summary>Boştayken (araç yokken) saniyede işlenecek kare. CPU tasarrufu için düşük tutulur.</summary>
     public double IdleFps { get; set; } = 1;
@@ -28,6 +31,12 @@ public sealed class AnprServiceOptions
 
     /// <summary>ONNX Runtime IntraOp thread sayısı (zayıf CPU için 2).</summary>
     public int OnnxIntraOpThreads { get; set; } = 2;
+
+    /// <summary>
+    /// ONNX thread'leri boşta dönerek mi beklesin? Zayıf PC'de false = boşta CPU ~0 (uyarlanabilir fps ile
+    /// çoğu zaman boşta); kare-başı gecikme birkaç ms artabilir. Ölçümle karar verin.
+    /// </summary>
+    public bool OnnxAllowSpinning { get; set; } = true;
 
     public string DetectorModelPath { get; set; } = "models/yolo-v9-t-384-license-plates-end2end.onnx";
     public string OcrModelPath { get; set; } = "models/cct_xs_v1_global.onnx";
@@ -75,6 +84,33 @@ public sealed class AnprServiceOptions
     /// güvenli tüm-plaka seçilir.
     /// </summary>
     public bool CharacterVoting { get; set; } = true;
+
+    /// <summary>
+    /// TR gramer-kısıtlı çözümleme: biriken slot dağılımını geçerli Türk plaka yapılarına göre çözer
+    /// (8/B, 0/O, 1/I gibi karışıklıkları pozisyona göre çözer). CharacterVoting ile birlikte çalışır.
+    /// </summary>
+    public bool ConstrainedDecoding { get; set; } = true;
+
+    /// <summary>
+    /// Kimlik anahtarında il'i yok say (harf|rakam) → il ilk-hanesi yanlış okunan aynı araç tek olaya
+    /// iner, il oylamayla belirlenir. Çift/yanlış-il emitlerini azaltır. false = eski (il|harf).
+    /// </summary>
+    public bool MergeAcrossProvince { get; set; } = false;
+
+    /// <summary>
+    /// Bulanık zamansal kümeleme: >0 ise aktif penceredeki okumalar edit-mesafesi ≤ bu değerle birleşir →
+    /// aynı aracın geçişindeki il/rakam/harf yanlış-okuma varyantları TEK olaya çöker (kamera-ANPR davranışı).
+    /// diag'da emit 18→8/gürültü 11→1; live1h'te yanlış-emit -%24 (recall -1 araç). Bariyerde recall öncelikli
+    /// olduğu için varsayılan 1 (güvenli); daha temiz çıktı için 2, kapatmak için 0.
+    /// </summary>
+    public int FuzzyMergeDistance { get; set; } = 1;
+
+    /// <summary>
+    /// Güven-kapılı erken emit: onaylı izin uzlaşı OCR güveni bu eşiğin altındaysa hemen yayınlama,
+    /// daha iyi okuma bekle (en geç SettleWindow'da yayınlanır). Uzaktan kırpık okumayla erken/yanlış
+    /// emit'i keser; yüksek güvenli plakaya gecikme eklemez. 0 = kapalı. Ölçümle karar verilir.
+    /// </summary>
+    public float EarlyEmitMinOcr { get; set; } = 0f;
 
     /// <summary>OCR öncesi plaka deskew (eğiklik düzeltme). Açılı veride ÖLÇÜLMELİ. Varsayılan kapalı.</summary>
     public bool DeskewPlates { get; set; } = false;

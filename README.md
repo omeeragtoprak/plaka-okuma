@@ -51,7 +51,10 @@ GPU/CUDA bağımlılığı yoktur.
 - **Dedektör (varsayılan):** `yolo-v9-t-384-license-plates-end2end.onnx`
   - Ampirik test: `256` gerçek (uzak/açılı) bir plakayı **kaçırdı**, `384`/`512` buldu. Bu yüzden
     varsayılan **384** (denge). Daha çok recall için `512`, en hızlı için `256` (config'ten değişir).
-- **OCR (varsayılan):** `cct_xs_v2_global.onnx` (3.2 MB) + `cct_xs_v2_global_plate_config.yaml`
+- **OCR (varsayılan):** `cct_xs_v2_erz.onnx` (3.0 MB) + `cct_xs_v2_erz_plate_config.yaml` — kendi
+  geçidimizin kamera-etiketli verisiyle fine-tune (2026-07-03; her koşulda ölçülü kazanç: gündüz val
+  %67→75, kamera-referans 21→22/26, live1h yanlış-emit −%26, gece %75→84; gecikme aynı). Geri dönüş:
+  `cct_xs_v2_global.onnx` dosyada duruyor. Eğitim akışı: `docs/finetune-runbook.md`.
   - fast-plate-ocr **V2** modeli: 3× veriyle + boş-plaka negatifleriyle eğitilmiş, eğitim bölgelerinde
     **Türkiye dahil**. Çıkış: `plate` `[N,10,37]` + `region` `[N,66]` (ülke; region yok sayılır).
     Alfabe `0-9A-Z_`, 10 slot, 128×64 RGB uint8. `cct_s_v2` (daha doğru, biraz daha büyük) de mevcut.
@@ -111,6 +114,11 @@ PLAKA 25 ADT 382 | Çıkış (cikis) | güven=81 % (det=81 % ocr=100 %) | ham='2
 | `IdleFps` | Boştayken (araç yokken) saniyede işlenen kare — CPU tasarrufu | `1` |
 | `ActiveHoldSeconds` | Bir tespitten sonra bu kadar sn "aktif" hızda işlenir | `4` |
 | `CharacterVoting` | Karakter-bazlı çok-kareli oylama (slot-bazlı uzlaşı). Doğruluğu artırır | `true` |
+| `ConstrainedDecoding` | TR gramer-kısıtlı çözümleme (geçerli plaka yapısına zorlar). Güvenli; ölçümde nötr | `true` |
+| `MergeAcrossProvince` | Kimlikte il'i yok say (harf\|rakam) → il varyantlarını birleştir. 1 saatlik testte net kazanç yok (emit gürültüsü arttı) → varsayılan kapalı | `false` |
+| `FuzzyMergeDistance` | Bulanık zamansal kümeleme: aktif penceredeki edit-mesafesi ≤N okumalar aynı araç sayılıp tek uzlaşıya çöker (kamera-ANPR davranışı). İz, gördüğü TÜM varyantları tutar; bir okuma birden çok ize uyarsa izler köprü-birleşir (bölünmüş-iz çift-emitini keser; diag4+live1h'te ölçüldü, recall bedeli yok). `1`=güvenli (bariyer), `2`=daha temiz ama over-merge riski, `0`=kapalı | `1` |
+| `EarlyEmitMinOcr` | Güven-kapılı erken emit: onaylı izin uzlaşı güveni eşiğin altındaysa hemen yayınlamaz, daha iyi okuma bekler (en geç settle'da yayınlar). Ölçümde bu sette etkisiz çıktı → varsayılan kapalı; mekanizma güvenli, saha ayarı | `0` |
+| `OnnxAllowSpinning` | ONNX thread'leri boşta dönerek mi beklesin. Zayıf PC'de `false` = boşta CPU ~0 (kare-başı gecikme birkaç ms artabilir). Ölçümle karar verin | `true` |
 | `MinPlateWidthRatio` | Tetik bölgesi: OCR yalnızca plaka genişliği kare genişliğinin bu oranından büyükse. `0`=kapalı, `~0.03` uzakları eler | `0.0` |
 | `DeskewPlates` | OCR öncesi plaka eğikliğini düzelt (deskew). Açılı veride ÖLÇÜLMELİ; varsayılan kapalı | `false` |
 | `DedupWindowSeconds` | Aynı plaka aynı kamerada bu süre içinde tekrar görülürse tek olay | `8` |
@@ -265,6 +273,32 @@ sıfırladı; gecikme aynı kaldı. (Zayıf hedef PC'de gecikme birkaç kat arta
 verdi** (%100 → %87.5 — düz plakayı gereksiz döndürüp bozuyor). Bu yüzden **varsayılan KAPALI**;
 yalnızca gerçekten açılı plaka sorunu olan bir veri setinde açıp tekrar ölçmek gerekir. (Ölçüm
 düzeneği bu regresyonu yakaladığı için değerli.)
+
+### Zor/düşük çözünürlük için denenen uzman teknikler (hepsi ÖLÇÜLDÜ)
+
+Düşük çözünürlüklü/zor plakalar için literatürdeki CPU-dostu teknikler uygulanıp `evaluate --degrade`
+(sentetik bozma: küçültme+JPEG) ile ölçüldü. Sonuçlar (etiketli set, artan bozulma):
+
+| Bozulma | Taban (V2+oylama) |
+|---|---|
+| yok | %100 |
+| orta | %87.5 |
+| ağır | %50 (çoğu KAÇAN — tespit edilemiyor) |
+
+- **TR gramer-kısıtlı çözümleme** (`ConstrainedDecoding`, slot dağılımı + Türk plaka dilbilgisi ile
+  en olası GEÇERLİ plaka): tüm bozulma seviyelerinde tabanla **AYNI** — zarar YOK ama ölçülebilir
+  kazanç da YOK (mevcut normalize/düzeltme ile büyük ölçüde örtüşüyor; hatalar tip-karışması değil
+  *aynı-tip* rakam hatası ya da kaçan tespit). Güvenli olduğu için **varsayılan açık** bırakıldı.
+- **Çok-kareli piksel füzyonu** (`PlateFuser`: kareleri hizala+ortala): **ZARAR VERDİ** (bozulma
+  orta: tek-kare %100 vs füzyon 3/8; ağır: 5/8 vs 2/8). Neden: araç HAREKETLİ — plaka her karede
+  farklı ölçek/konumda; ucuz tamsayı-kaydırma hizalaması yetersiz, ortalama karakterleri **bulaştırıyor**
+  (ör. "25 TR 5500"). Doğru kayıt için kare-başına perspektif hizalama gerekir → pahalı, CPU kuralını
+  bozar. Bu yüzden servise **DAHİL EDİLMEDİ** (kod `PlateFuser`/`Anpr.Bench fusetest` olarak duruyor).
+
+**Sonuç:** Bu problemde doğru çok-kareli teknik **olasılık düzeyinde oylama** (zaten var — karakter
+oylaması), piksel füzyonu değil. Düşük çözünürlük için asıl kaldıraç **yakalama tarafı**: plakayı
+UZAKTAN değil YAKINken (büyükken) okumak — bunun için **tetik bölgesi** (`MinPlateWidthRatio`) +
+uyarlanabilir fps var. Daha fazla per-piksel işleme (deskew/füzyon) ölçümle elendi.
 
 ---
 

@@ -57,6 +57,10 @@ public sealed class CameraWorker : IAsyncDisposable
             SettleWindow = TimeSpan.FromSeconds(Math.Max(0, options.SettleWindowSeconds)),
             MinConfirmations = Math.Max(1, options.MinConfirmations),
             CharacterVoting = options.CharacterVoting,
+            ConstrainedDecoding = options.ConstrainedDecoding,
+            MergeAcrossProvince = options.MergeAcrossProvince,
+            FuzzyMergeDistance = options.FuzzyMergeDistance,
+            EarlyEmitMinOcr = options.EarlyEmitMinOcr,
         });
     }
 
@@ -123,6 +127,11 @@ public sealed class CameraWorker : IAsyncDisposable
     {
         string compact = Compact(best.Text);
         if (compact.Length == 0) return;
+
+        // Emit-seviyesi güven tabanı: birleşik/uzlaşı okumanın güveni de tabanı geçmeli
+        // (taban kare-başında uygulanıyor ama uzlaşının güveni altına düşebilir -> sızıntıyı keser).
+        if (best.OcrConfidence < _options.EmitMinOcrConfidence) return;
+        if (best.Confidence < _options.EmitMinConfidence) return;
 
         var evt = new PlateEvent
         {

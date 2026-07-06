@@ -5,8 +5,6 @@ namespace Anpr.Core;
 /// </summary>
 public readonly record struct PlateBox(int X, int Y, int Width, int Height);
 
-/// <summary>Tek bir OCR slotunun tahmini: seçilen karakter + olasılığı. Karakter-bazlı oylama için.</summary>
-public readonly record struct SlotPrediction(char Char, float Prob);
 
 /// <summary>
 /// Tek bir plaka okuması. Anpr.Core'un dışarıya verdiği temel sonuç tipidir.
@@ -35,10 +33,13 @@ public sealed record PlateReading
     public required bool IsValidTr { get; init; }
 
     /// <summary>
-    /// OCR'ın slot-bazlı tahminleri (pad dahil, model slot sayısı kadar). Karakter-bazlı çok-kareli
-    /// oylama için kullanılır. Bilinmiyorsa null.
+    /// OCR'ın slot-bazlı TAM olasılık dağılımı (uzunluk = slot × vocab, satır-öncelikli: slot sonra vocab).
+    /// Karakter-bazlı oylama + gramer-kısıtlı çözümleme için. Bilinmiyorsa null.
     /// </summary>
-    public IReadOnlyList<SlotPrediction>? Slots { get; init; }
+    public float[]? SlotProbs { get; init; }
+
+    /// <summary>OCR alfabesi (SlotProbs'taki vocab sırası). SlotProbs doluysa dolu olur.</summary>
+    public string? OcrAlphabet { get; init; }
 
     public override string ToString() =>
         $"{Text} (conf={Confidence:F2}, det={DetectorConfidence:F2}, ocr={OcrConfidence:F2}, tr={IsValidTr})";

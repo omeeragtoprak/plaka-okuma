@@ -24,18 +24,20 @@ public class PlateConfirmerTests
     });
 
     [Fact]
-    public void One_off_misread_is_suppressed_best_variant_wins()
+    public void Confirmed_plate_wins_over_one_off_number_misread()
     {
-        // Gerçek senaryo: araç 32 karede "25 AFH 149" (yüksek güven), 1 karede yanlış "25 AFH 11".
-        var c = New(minConf: 2);
+        // Kimlik artık HARF|RAKAM. Tek seferlik rakam-yanlışı "25 AFH 11" AYRI kimliktir; onaylanan
+        // "25 AFH 149" yayınlanır, tek-seferlik yanlış (onaysız, settle dolmadı) yayınlanmaz.
+        // (Üretimde düşük güvenli tek okuma zaten OCR tabanıyla elenir.)
+        var c = New(minConf: 2, settleSec: 3);
         var t = new DateTimeOffset(2026, 6, 29, 12, 0, 0, TimeSpan.Zero);
 
         c.Observe(Reading("25 AFH 149", 0.95f), t);
-        c.Observe(Reading("25 AFH 11", 0.40f), t.AddSeconds(1)); // tek seferlik yanlış (düşük güven)
+        c.Observe(Reading("25 AFH 11", 0.40f), t.AddSeconds(1)); // farklı rakam -> ayrı kimlik
+        c.Observe(Reading("25 AFH 149", 0.96f), t.AddSeconds(2)); // 149 onaylanır (count 2)
 
-        var ready = c.DrainReady(t.AddSeconds(1));
+        var ready = c.DrainReady(t.AddSeconds(2));
 
-        // İl+harf kimliği aynı -> tek olay, en yüksek güvenli okuma kazanır.
         Assert.Single(ready);
         Assert.Equal("25 AFH 149", ready[0].Text);
     }
@@ -79,6 +81,151 @@ public class PlateConfirmerTests
         c.Observe(Reading("25 AG 368", 0.9f), t);
         var ready = c.DrainReady(t);
         Assert.Equal(2, ready.Count);
+    }
+
+    [Fact]
+    public void Province_variants_merge_and_majority_wins()
+    {
+        // Aynı harf+rakam, il ilk-hanesi yanlış okunmuş varyant (35) -> aynı ize düşmeli,
+        // yüksek güvenli (çoğunluk) 25 kazanmalı, TEK olay çıkmalı. (MergeAcrossProvince açık gerekir)
+        var c = new PlateConfirmer(new PlateConfirmerOptions
+        {
+            DedupWindow = TimeSpan.FromSeconds(8),
+            SettleWindow = TimeSpan.FromSeconds(3),
+            MinConfirmations = 2,
+            MergeAcrossProvince = true,
+        });
+        var t = new DateTimeOffset(2026, 6, 29, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading("25 AFG 450", 0.95f), t);
+        c.Observe(Reading("35 AFG 450", 0.50f), t.AddSeconds(1));
+        var ready = c.DrainReady(t.AddSeconds(1));
+        Assert.Single(ready);
+        Assert.Equal("25 AFG 450", ready[0].Text);
+    }
+
+    [Fact]
+    public void Fuzzy_clustering_collapses_passage_variants_to_one()
+    {
+        // Aynı geçişin il/rakam yanlış-okuma varyantları (edit-mesafesi ≤2) TEK olaya çökmeli (kamera davranışı).
+        var c = new PlateConfirmer(new PlateConfirmerOptions
+        {
+            DedupWindow = TimeSpan.FromSeconds(8),
+            SettleWindow = TimeSpan.FromSeconds(3),
+            MinConfirmations = 2,
+            FuzzyMergeDistance = 2,
+        });
+        var t = new DateTimeOffset(2026, 6, 29, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading("25 ACR 626", 0.90f), t);
+        c.Observe(Reading("75 ACR 626", 0.60f), t.AddSeconds(1)); // il varyantı (dist 1)
+        c.Observe(Reading("25 ACR 628", 0.55f), t.AddSeconds(2)); // rakam varyantı (dist 1)
+        var ready = c.DrainReady(t.AddSeconds(2));
+        Assert.Single(ready);
+        Assert.Equal("25 ACR 626", ready[0].Text); // en güvenli okuma kazanır
+    }
+
+    [Fact]
+    public void Fuzzy_clustering_keeps_distinct_cars_separate()
+    {
+        // Uzak plakalar (edit-mesafesi > eşik) birleşmemeli.
+        var c = new PlateConfirmer(new PlateConfirmerOptions
+        {
+            DedupWindow = TimeSpan.FromSeconds(8),
+            SettleWindow = TimeSpan.FromSeconds(3),
+            MinConfirmations = 1,
+            FuzzyMergeDistance = 2,
+        });
+        var t = new DateTimeOffset(2026, 6, 29, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading("25 ACR 626", 0.9f), t);
+        c.Observe(Reading("34 BFG 100", 0.9f), t); // tamamen farklı araç
+        var ready = c.DrainReady(t);
+        Assert.Equal(2, ready.Count);
+    }
+
+    [Fact]
+    public void Bridge_reading_merges_split_tracks_single_emit()
+    {
+        // diag4'te ÖLÇÜLEN gerçek vaka (trace): hızlı araç 3 karede 3 farklı okuma verdi:
+        //   25AFB625 (izA) -> 25AFB52 (izA'ya lev2 -> ayrı iz B!) -> 25AFB525 (HEM A'ya HEM B'ye lev1 = KÖPRÜ)
+        // Köprü okuma izleri birleştirmeli -> TEK emit (eski kod: B ayrı kalıp settle'da 2. emit üretiyordu).
+        var c = new PlateConfirmer(new PlateConfirmerOptions
+        {
+            DedupWindow = TimeSpan.FromSeconds(8),
+            SettleWindow = TimeSpan.FromSeconds(3),
+            MinConfirmations = 2,
+            FuzzyMergeDistance = 1,
+        });
+        var t = new DateTimeOffset(2026, 6, 29, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading("25 AFB 625", 0.81f), t);
+        c.Observe(Reading("25 AFB 52", 0.72f), t.AddSeconds(1));   // A'ya lev2 -> ayrı iz
+        c.Observe(Reading("25 AFB 525", 0.95f), t.AddSeconds(2));  // köprü: A ve B birleşir + onay
+        var ready = c.DrainReady(t.AddSeconds(2));
+        Assert.Single(ready);
+        Assert.Equal("25 AFB 525", ready[0].Text);                 // en yüksek güvenli okuma
+        // settle sonrasında da İKİNCİ emit GELMEMELİ (eski hata buydu):
+        Assert.Empty(c.DrainReady(t.AddSeconds(10)));
+    }
+
+    [Fact]
+    public void Fuzzy_matches_any_seen_variant_not_just_best()
+    {
+        // Best drift vakası (diag4'te ölçülen gerçek çift-emit): iz "25 AFB 52" ile başlar, Best daha
+        // yüksek güvenli "25 AFB 92"ye kayar; tam okuma "25 AFB 525" Best'e lev=2 (eski kod: yeni iz →
+        // ÇİFT emit) ama görülen varyant "25AFB52"ye lev=1 → AYNI ize düşmeli, TEK emit.
+        var c = new PlateConfirmer(new PlateConfirmerOptions
+        {
+            DedupWindow = TimeSpan.FromSeconds(8),
+            SettleWindow = TimeSpan.FromSeconds(3),
+            MinConfirmations = 3,
+            FuzzyMergeDistance = 1,
+        });
+        var t = new DateTimeOffset(2026, 6, 29, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading("25 AFB 52", 0.60f), t);
+        c.Observe(Reading("25 AFB 92", 0.95f), t.AddSeconds(1));   // lev1 -> merge, Best drift eder
+        c.Observe(Reading("25 AFB 525", 0.90f), t.AddSeconds(2));  // Best'e lev2, varyanta lev1 -> merge
+        var ready = c.DrainReady(t.AddSeconds(2));
+        Assert.Single(ready); // tek iz, tek emit (onay 3'e ulaştı)
+    }
+
+    [Fact]
+    public void Early_emit_gate_holds_low_confidence_until_better_read()
+    {
+        // Uzaktan gelen 2 kırpık/düşük-güven okuma onayı doldursa da EMIT edilmemeli (kapı);
+        // araç yaklaşınca gelen iyi okuma izi günceller ve o anda yayınlanır.
+        var c = new PlateConfirmer(new PlateConfirmerOptions
+        {
+            DedupWindow = TimeSpan.FromSeconds(8),
+            SettleWindow = TimeSpan.FromSeconds(3),
+            MinConfirmations = 2,
+            EarlyEmitMinOcr = 0.8f,
+        });
+        var t = new DateTimeOffset(2026, 6, 29, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading("25 AFB 52", 0.55f), t);
+        c.Observe(Reading("25 AFB 52", 0.60f), t.AddSeconds(1));
+        Assert.Empty(c.DrainReady(t.AddSeconds(1)));               // onaylı ama güven < 0.8 -> bekle
+        c.Observe(Reading("25 AFB 525", 0.95f), t.AddSeconds(2));  // yakın-mesafe iyi okuma (aynı il|harf izi)
+        var ready = c.DrainReady(t.AddSeconds(2));
+        Assert.Single(ready);
+        Assert.Equal("25 AFB 525", ready[0].Text);                 // yanlış/kırpık erken emit YOK
+    }
+
+    [Fact]
+    public void Early_emit_gate_still_emits_at_settle()
+    {
+        // İyi okuma hiç gelmezse settle'da yine de yayınla (aracı kaçırma).
+        var c = new PlateConfirmer(new PlateConfirmerOptions
+        {
+            DedupWindow = TimeSpan.FromSeconds(8),
+            SettleWindow = TimeSpan.FromSeconds(3),
+            MinConfirmations = 2,
+            EarlyEmitMinOcr = 0.8f,
+        });
+        var t = new DateTimeOffset(2026, 6, 29, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading("06 ABC 123", 0.55f), t);
+        c.Observe(Reading("06 ABC 123", 0.60f), t.AddSeconds(1));
+        Assert.Empty(c.DrainReady(t.AddSeconds(1)));
+        var ready = c.DrainReady(t.AddSeconds(5)); // settle doldu
+        Assert.Single(ready);
+        Assert.Equal("06 ABC 123", ready[0].Text);
     }
 
     [Fact]

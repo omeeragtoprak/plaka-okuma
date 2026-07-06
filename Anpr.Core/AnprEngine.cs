@@ -85,32 +85,72 @@ public sealed class AnprEngine : IDisposable
             }
             var ocr = _recognizer.Recognize(deskewed ?? crop);
             deskewed?.Dispose();
-            if (string.IsNullOrWhiteSpace(ocr.Text)) continue;
 
-            bool validTr = false;
-            string text = ocr.Text;
-            if (_options.ApplyTurkishValidation)
-            {
-                var tr = TurkishPlateNormalizer.Normalize(ocr.Text);
-                validTr = tr.IsValid;
-                if (validTr) text = tr.Normalized!;
-            }
-
-            readings.Add(new PlateReading
-            {
-                Text = text,
-                RawText = ocr.Text,
-                Confidence = det.Confidence * ocr.MeanConfidence,
-                DetectorConfidence = det.Confidence,
-                OcrConfidence = ocr.MeanConfidence,
-                Box = new PlateBox(rect.Left, rect.Top, rect.Width, rect.Height),
-                IsValidTr = validTr,
-                Slots = ocr.Slots,
-            });
+            var reading = BuildReading(ocr, new PlateBox(rect.Left, rect.Top, rect.Width, rect.Height), det.Confidence);
+            if (reading != null) readings.Add(reading);
         }
 
         readings.Sort((a, b) => b.Confidence.CompareTo(a.Confidence));
         return readings;
+    }
+
+    /// <summary>Recognize gibi ama her okumanın KIRPINTISINI da döner (çağıran sahiplenir, dispose eder).
+    /// Çok-kareli füzyon için worker'ın kırpıntı saklaması gerektiğinde kullanılır.</summary>
+    public IReadOnlyList<(PlateReading Reading, SKBitmap Crop)> RecognizeWithCrops(byte[] imageBytes)
+    {
+        ArgumentNullException.ThrowIfNull(imageBytes);
+        using var image = SkiaImaging.DecodeRgba(imageBytes);
+        var detections = _detector.Detect(image);
+        var results = new List<(PlateReading, SKBitmap)>();
+        int minPlateW = (int)(image.Width * _options.MinPlateWidthRatio);
+        foreach (var det in detections)
+        {
+            if (det.Confidence < _options.MinConfidence) continue;
+            if (det.Width < minPlateW) continue;
+            var rect = ExpandAndClamp(det, image.Width, image.Height, _options.CropPaddingRatio);
+            if (rect.Width < 2 || rect.Height < 2) continue;
+            using var crop = SkiaImaging.ExtractSubset(image, rect);
+            var ocr = _recognizer.Recognize(crop);
+            var reading = BuildReading(ocr, new PlateBox(rect.Left, rect.Top, rect.Width, rect.Height), det.Confidence);
+            if (reading != null) results.Add((reading, crop.Copy()));
+        }
+        return results;
+    }
+
+    /// <summary>Birkaç kırpıntıyı füzyonla birleştirip füzyon görüntüsünde OCR çalıştırır → tek okuma.</summary>
+    public PlateReading? RecognizeFused(IReadOnlyList<SKBitmap> crops)
+    {
+        if (crops == null || crops.Count == 0) return null;
+        using var fused = PlateFuser.Fuse(crops);
+        var ocr = _recognizer.Recognize(fused);
+        return BuildReading(ocr, default, 1.0f);
+    }
+
+    private PlateReading? BuildReading(Recognition.PlateOcrResult ocr, PlateBox box, float detConf)
+    {
+        if (string.IsNullOrWhiteSpace(ocr.Text)) return null;
+
+        bool validTr = false;
+        string text = ocr.Text;
+        if (_options.ApplyTurkishValidation)
+        {
+            var tr = TurkishPlateNormalizer.Normalize(ocr.Text);
+            validTr = tr.IsValid;
+            if (validTr) text = tr.Normalized!;
+        }
+
+        return new PlateReading
+        {
+            Text = text,
+            RawText = ocr.Text,
+            Confidence = detConf * ocr.MeanConfidence,
+            DetectorConfidence = detConf,
+            OcrConfidence = ocr.MeanConfidence,
+            Box = box,
+            IsValidTr = validTr,
+            SlotProbs = ocr.SlotProbs,
+            OcrAlphabet = ocr.Alphabet,
+        };
     }
 
     private static SKRectI ExpandAndClamp(PlateDetection det, int imgW, int imgH, float padRatio)

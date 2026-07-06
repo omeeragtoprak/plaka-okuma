@@ -69,6 +69,7 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                     OcrModelPath = ocr,
                     OcrConfigPath = ocrCfg,
                     OnnxIntraOpThreads = _options.OnnxIntraOpThreads,
+                    OnnxAllowSpinning = _options.OnnxAllowSpinning,
                     MinConfidence = _options.MinConfidence,
                     DetectorScoreThreshold = _options.DetectorScoreThreshold,
                     CropPaddingRatio = _options.CropPaddingRatio,

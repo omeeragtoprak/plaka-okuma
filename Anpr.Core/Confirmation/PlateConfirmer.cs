@@ -17,22 +17,49 @@ public sealed class PlateConfirmerOptions
     public int MinConfirmations { get; set; } = 2;
 
     /// <summary>
-    /// Karakter-bazlı oylama: açıksa, aynı aracın tüm karelerinde her SLOT pozisyonu için olasılıklar
-    /// toplanır ve pozisyon-başına en olası karakter seçilerek uzlaşı plaka kurulur. Tek karede hiçbiri
-    /// tam doğru olmasa bile doğru plaka çıkabilir. Kapalıysa en yüksek güvenli tüm-plaka seçilir.
+    /// Karakter-bazlı oylama: açıksa, aynı aracın tüm karelerinde slot-başına olasılık dağılımları
+    /// toplanır ve pozisyon-başına en olası karakter seçilerek uzlaşı plaka kurulur. Kapalıysa en yüksek
+    /// güvenli tüm-plaka seçilir.
     /// </summary>
     public bool CharacterVoting { get; set; } = true;
+
+    /// <summary>
+    /// TR gramer-kısıtlı çözümleme: açıksa (ve CharacterVoting açıksa) biriken dağılım, geçerli TR
+    /// yapıları üzerinden çözülür (8/B, 0/O, 1/I gibi karışıklıkları pozisyona göre çözer). Kapalıysa
+    /// düz pozisyon-argmax + normalizasyon.
+    /// </summary>
+    public bool ConstrainedDecoding { get; set; } = true;
+
+    /// <summary>
+    /// Kimlik anahtarında il'i yok say (harf|rakam). İl varyantlarını birleştirir AMA rakam-varyantlarını
+    /// ayırır; live1h ölçümünde net kazanç vermedi (recall +1pp, emit gürültüsü arttı) → varsayılan KAPALI.
+    /// false = il|harf (rakam-varyantlarını birleştirir, daha temiz çıktı).
+    /// </summary>
+    public bool MergeAcrossProvince { get; set; } = false;
+
+    /// <summary>
+    /// Bulanık zamansal kümeleme: >0 ise, aktif penceredeki (DedupWindow) okumalar KESİN kimlik yerine
+    /// edit-mesafesi ≤ bu değer olacak şekilde eşleştirilir. Böylece aynı aracın geçişindeki il/rakam/harf
+    /// yanlış-okuma varyantları TEK ize düşer (kamera-ANPR davranışı), karakter-oylamasıyla uzlaşı çıkar.
+    /// 0 = kapalı (kesin kimlik anahtarı). Kameraya yaklaşmak için ~2 önerilir; ölçülmeli.
+    /// </summary>
+    public int FuzzyMergeDistance { get; set; } = 0;
+
+    /// <summary>
+    /// Güven-kapılı erken emit: onay sayısına ulaşan iz, uzlaşı OCR güveni bu eşiğin ALTINDAYSA hemen
+    /// yayınlanmaz; araç yaklaştıkça gelen daha iyi okumaları bekler (en geç SettleWindow'da yayınlanır).
+    /// Uzaktan 2 kırpık okumayla erken/yanlış emit'i keser (kamera tetik-çizgisi davranışına yaklaşır).
+    /// Yüksek güvenli plakalar için gecikme eklemez. 0 = kapalı (eski davranış).
+    /// </summary>
+    public float EarlyEmitMinOcr { get; set; } = 0f;
 }
 
 /// <summary>
 /// Aynı aracın ardışık karelerdeki okumalarını birleştirip TEK ve EN GÜVENİLİR olayı üretir.
 ///
-/// Kimlik anahtarı = il + harf bloğu (ör. "25|AFH"). İki birleştirme stratejisi:
-///  - CharacterVoting=true: slot-bazlı olasılık toplamı -> pozisyon-başına argmax -> uzlaşı plaka.
-///  - false: en yüksek güvenli tüm-plaka okuması.
-///
-/// Tek karede görülen araç da SettleWindow sonunda yayınlanır (kaçırılmaz). Thread-safe değildir;
-/// tek bir kamera döngüsünden sıralı kullanılır.
+/// Kimlik anahtarı = il + harf bloğu (ör. "25|AFH"). CharacterVoting açıkken slot-başına TAM olasılık
+/// dağılımı biriktirilir; emitte ConstrainedDecoding açıksa TR gramer-kısıtlı çözümleme, değilse
+/// pozisyon-argmax + normalizasyon uygulanır. Thread-safe değildir; tek kamera döngüsünden sıralı kullanılır.
 /// </summary>
 public sealed class PlateConfirmer
 {
@@ -42,13 +69,17 @@ public sealed class PlateConfirmer
         public DateTimeOffset Last;
         public PlateReading Best = null!;
         public bool Emitted;
-        // slot index -> (karakter -> olasılık toplamı)
-        public Dictionary<int, Dictionary<char, float>>? SlotVotes;
-        public int SlotLen;
+        public float[]? SlotSum;   // slots*vocab, kareler boyunca toplam
+        public string? Alphabet;
+        public int Slots;
+        // Fuzzy modda bu izde görülen TÜM okuma varyantları (compact). Eşleşme yalnız Best.Text'e
+        // yapılırsa Best geçiş sırasında kayar (drift) ve aynı araç ikinci ize bölünür → çift emit.
+        public HashSet<string>? Variants;
     }
 
     private readonly Dictionary<string, Track> _tracks = new();
     private readonly PlateConfirmerOptions _o;
+    private int _seq;
 
     public PlateConfirmer(PlateConfirmerOptions options) => _o = options;
 
@@ -56,27 +87,58 @@ public sealed class PlateConfirmer
     {
         if (!reading.IsValidTr) return;
 
-        string key = IdentityKey(reading.Text);
-        if (!_tracks.TryGetValue(key, out var t) || (t.Emitted && now - t.Last > _o.DedupWindow))
+        Track? t; string key;
+        if (_o.FuzzyMergeDistance > 0)
         {
-            t = new Track { Count = 0, Best = reading };
-            _tracks[key] = t;
+            // Okumaya uyan TÜM izler: birden fazlaysa okuma bir KÖPRÜdür — aynı aracın bölünmüş
+            // izleridir (ölçülen vaka: 25AFB625 ←1→ 25AFB525 ←1→ 25AFB52, uçlar arası lev=2).
+            // İzleri birleştir; oylamalar toplanır, konsensus doğru plakayı verir, çift emit biter.
+            var matches = FindFuzzyMatches(reading, now);
+            if (matches.Count == 0)
+            {
+                key = Compact(reading.Text) + "#" + (_seq++);
+                t = new Track { Count = 0, Best = reading };
+                _tracks[key] = t;
+            }
+            else
+            {
+                (key, t) = (matches[0].Key, matches[0].Track);
+                for (int i = 1; i < matches.Count; i++)
+                {
+                    MergeTracks(t, matches[i].Track);
+                    _tracks.Remove(matches[i].Key);
+                }
+                if (t.Emitted && now - t.Last > _o.DedupWindow)
+                {
+                    t = new Track { Count = 0, Best = reading };
+                    _tracks[key] = t;
+                }
+            }
+            (t.Variants ??= new HashSet<string>()).Add(Compact(reading.Text));
+        }
+        else
+        {
+            key = IdentityKey(reading.Text);
+            if (!_tracks.TryGetValue(key, out t) || (t.Emitted && now - t.Last > _o.DedupWindow))
+            {
+                t = new Track { Count = 0, Best = reading };
+                _tracks[key] = t;
+            }
         }
 
         t.Count++;
         t.Last = now;
         if (reading.Confidence > t.Best.Confidence) t.Best = reading;
 
-        if (_o.CharacterVoting && reading.Slots is { Count: > 0 } slots)
+        if (_o.CharacterVoting && reading.SlotProbs is { Length: > 0 } sp && reading.OcrAlphabet is { Length: > 0 } alpha)
         {
-            t.SlotVotes ??= new Dictionary<int, Dictionary<char, float>>();
-            t.SlotLen = Math.Max(t.SlotLen, slots.Count);
-            for (int i = 0; i < slots.Count; i++)
+            if (t.SlotSum == null || t.SlotSum.Length != sp.Length)
             {
-                if (!t.SlotVotes.TryGetValue(i, out var m)) { m = new Dictionary<char, float>(); t.SlotVotes[i] = m; }
-                m.TryGetValue(slots[i].Char, out var p);
-                m[slots[i].Char] = p + slots[i].Prob; // olasılıkla ağırlıklı oy
+                t.SlotSum = new float[sp.Length];
+                t.Alphabet = alpha;
+                t.Slots = sp.Length / alpha.Length;
             }
+            for (int i = 0; i < sp.Length; i++) t.SlotSum[i] += sp[i];
         }
     }
 
@@ -92,8 +154,13 @@ public sealed class PlateConfirmer
             bool settled = now - t.Last >= _o.SettleWindow;
             if (confirmed || settled)
             {
+                var result = BuildResult(t);
+                // Erken (settle olmadan) emit için uzlaşı güveni eşiği geçmeli; geçmiyorsa araç
+                // yaklaştıkça gelecek daha iyi okumaları bekle (en geç settle'da yine yayınlanır).
+                if (!settled && _o.EarlyEmitMinOcr > 0 && result.OcrConfidence < _o.EarlyEmitMinOcr)
+                    continue;
                 t.Emitted = true;
-                (ready ??= new List<PlateReading>()).Add(BuildResult(t));
+                (ready ??= new List<PlateReading>()).Add(result);
             }
         }
 
@@ -106,43 +173,135 @@ public sealed class PlateConfirmer
         return ready ?? (IReadOnlyList<PlateReading>)Array.Empty<PlateReading>();
     }
 
-    // Karakter oylaması açıksa slot uzlaşısından plaka kur; değilse/başarısızsa en iyi okumayı döndür.
     private PlateReading BuildResult(Track t)
     {
-        if (!_o.CharacterVoting || t.SlotVotes == null || t.SlotLen == 0)
+        if (!_o.CharacterVoting || t.SlotSum == null || t.Alphabet == null || t.Slots == 0)
             return t.Best;
 
-        var raw = new char[t.SlotLen];
-        float sumProb = 0; int nonPad = 0;
-        for (int i = 0; i < t.SlotLen; i++)
+        // Biriken dağılımı ortalamaya çevir (0..1).
+        var mean = new float[t.SlotSum.Length];
+        for (int i = 0; i < mean.Length; i++) mean[i] = t.SlotSum[i] / t.Count;
+
+        string? normalized = null, rawCompact = null;
+        float conf = t.Best.OcrConfidence;
+
+        if (_o.ConstrainedDecoding)
         {
-            char bestCh = '_'; float bestP = -1;
-            if (t.SlotVotes.TryGetValue(i, out var m))
-                foreach (var kv in m)
-                    if (kv.Value > bestP) { bestP = kv.Value; bestCh = kv.Key; }
-            raw[i] = bestCh;
-            if (char.IsLetterOrDigit(bestCh)) { sumProb += bestP / Math.Max(1, t.Count); nonPad++; }
+            var dec = TrConstrainedDecoder.Decode(mean, t.Alphabet, t.Slots);
+            if (dec.Ok) { normalized = dec.Normalized; rawCompact = dec.Compact; conf = dec.Confidence; }
         }
 
-        string consensusRaw = new string(raw);
-        var tr = TurkishPlateNormalizer.Normalize(consensusRaw);
-        if (!tr.IsValid)
-            return t.Best; // uzlaşı geçersizse güvenli tarafa: en iyi okuma
+        if (normalized == null)
+        {
+            // Kısıtsız: pozisyon-argmax -> ham metin -> TR normalize
+            int vocab = t.Alphabet.Length;
+            var raw = new char[t.Slots];
+            for (int s = 0; s < t.Slots; s++)
+            {
+                int start = s * vocab; float bestP = -1; int bestIdx = 0;
+                for (int c = 0; c < vocab; c++) if (mean[start + c] > bestP) { bestP = mean[start + c]; bestIdx = c; }
+                raw[s] = t.Alphabet[bestIdx];
+            }
+            var tr = TurkishPlateNormalizer.Normalize(new string(raw));
+            if (tr.IsValid) { normalized = tr.Normalized; rawCompact = tr.Compact; }
+        }
 
-        float conf = nonPad > 0 ? Math.Min(1f, sumProb / nonPad) : t.Best.OcrConfidence;
+        if (normalized == null) return t.Best; // uzlaşı geçersizse en iyi okuma
+
         return t.Best with
         {
-            Text = tr.Normalized!,
-            RawText = new string(consensusRaw.Where(char.IsLetterOrDigit).ToArray()),
+            Text = normalized,
+            RawText = rawCompact ?? normalized.Replace(" ", ""),
             OcrConfidence = conf,
             Confidence = t.Best.DetectorConfidence * conf,
             IsValidTr = true,
         };
     }
 
-    private static string IdentityKey(string normalizedText)
+    // MergeAcrossProvince: kimlik = HARF|RAKAM (il hariç) -> il varyantları tek ize düşer, il oylanır.
+    // Aksi halde eski davranış = İL|HARF.
+    private string IdentityKey(string normalizedText)
     {
         var parts = normalizedText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length >= 2 ? parts[0] + "|" + parts[1] : normalizedText;
+        if (parts.Length < 3) return normalizedText;
+        return _o.MergeAcrossProvince ? parts[1] + "|" + parts[2] : parts[0] + "|" + parts[1];
+    }
+
+    // Aktif penceredeki (DedupWindow) izler arasında, okuması edit-mesafesi ≤ eşik olan TÜM izleri bul
+    // (mesafeye göre sıralı). Eşleşme, izde GÖRÜLMÜŞ TÜM varyantlara karşı yapılır (yalnız Best'e değil —
+    // Best drift edince aynı araç ikinci ize bölünüp çift emit üretiyordu). Birden çok eşleşme = okuma
+    // köprü: çağıran izleri birleştirir.
+    private List<(string Key, Track Track, int Dist)> FindFuzzyMatches(PlateReading reading, DateTimeOffset now)
+    {
+        string rc = Compact(reading.Text);
+        List<(string, Track, int)>? found = null;
+        foreach (var kv in _tracks)
+        {
+            if (now - kv.Value.Last > _o.DedupWindow) continue; // eski/farklı araç
+            int d = Levenshtein(rc, Compact(kv.Value.Best.Text));
+            if (kv.Value.Variants is { } vars)
+                foreach (var v in vars)
+                {
+                    if (d <= 0) break;
+                    int dv = Levenshtein(rc, v);
+                    if (dv < d) d = dv;
+                }
+            if (d <= _o.FuzzyMergeDistance) (found ??= new()).Add((kv.Key, kv.Value, d));
+        }
+        found?.Sort((a, b) => a.Item3.CompareTo(b.Item3));
+        return found ?? new List<(string, Track, int)>();
+    }
+
+    // İki bölünmüş izi birleştir: sayaçlar toplanır, oylama (SlotSum) birikimleri eklenir, varyantlar
+    // birleşir. Biri yayınlandıysa birleşik iz de yayınlanmış sayılır (çift emit engellenir).
+    private static void MergeTracks(Track into, Track other)
+    {
+        into.Count += other.Count;
+        if (other.Last > into.Last) into.Last = other.Last;
+        if (other.Best.Confidence > into.Best.Confidence) into.Best = other.Best;
+        into.Emitted |= other.Emitted;
+        if (other.SlotSum != null)
+        {
+            if (into.SlotSum == null || into.SlotSum.Length != other.SlotSum.Length)
+            {
+                into.SlotSum = other.SlotSum; into.Alphabet = other.Alphabet; into.Slots = other.Slots;
+            }
+            else
+            {
+                for (int i = 0; i < into.SlotSum.Length; i++) into.SlotSum[i] += other.SlotSum[i];
+            }
+        }
+        if (other.Variants != null)
+        {
+            (into.Variants ??= new HashSet<string>()).UnionWith(other.Variants);
+        }
+    }
+
+    private static string Compact(string s)
+    {
+        Span<char> buf = stackalloc char[s.Length];
+        int n = 0;
+        foreach (var ch in s) if (char.IsLetterOrDigit(ch)) buf[n++] = char.ToUpperInvariant(ch);
+        return new string(buf[..n]);
+    }
+
+    private static int Levenshtein(string a, string b)
+    {
+        if (a == b) return 0;
+        if (a.Length == 0) return b.Length;
+        if (b.Length == 0) return a.Length;
+        var dp = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) dp[j] = j;
+        for (int i = 1; i <= a.Length; i++)
+        {
+            int prev = dp[0]; dp[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cur = dp[j];
+                dp[j] = Math.Min(Math.Min(dp[j] + 1, dp[j - 1] + 1), prev + (a[i - 1] == b[j - 1] ? 0 : 1));
+                prev = cur;
+            }
+        }
+        return dp[b.Length];
     }
 }
