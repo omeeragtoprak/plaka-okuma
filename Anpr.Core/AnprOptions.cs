@@ -51,6 +51,13 @@ public sealed class AnprOptions
     public float MinPlateWidthRatio { get; set; } = 0.0f;
 
     /// <summary>
+    /// İlgi alanı (ROI) çokgeni, 0-1000 normalize "x1,y1;x2,y2;..." (Hikvision şerit koordinat ölçeği).
+    /// Tespit kutusunun merkezi çokgen dışındaysa OKUNMAZ → kapsam kameraya hizalanır + CPU tasarrufu.
+    /// Boş = kapalı (tüm kare okunur). Kamera başına ayrı verilmeli.
+    /// </summary>
+    public string RoiPolygon { get; set; } = "";
+
+    /// <summary>
     /// OCR öncesi plaka kırpıntısını eğiklikten kurtar (deskew). Açılı plakalarda yardımcı olabilir
     /// ama açılı veride ÖLÇÜLMELİ; clean plakada gereksiz döndürme zarar verebilir. Varsayılan KAPALI.
     /// </summary>

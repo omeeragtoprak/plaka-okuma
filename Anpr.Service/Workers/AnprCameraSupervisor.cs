@@ -76,6 +76,7 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                     ApplyTurkishValidation = _options.ApplyTurkishValidation,
                     MinPlateWidthRatio = _options.MinPlateWidthRatio,
                     DeskewPlates = _options.DeskewPlates,
+                    RoiPolygon = new Anpr.Service.Panel.RoiStore().LoadOrDefault(cam.Id, cam.Roi),
                 };
 
                 var engine = AnprEngine.Create(anprOptions);

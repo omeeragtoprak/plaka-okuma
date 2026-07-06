@@ -1,0 +1,148 @@
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
+using Anpr.Service.Configuration;
+using Microsoft.Extensions.Options;
+
+namespace Anpr.Service.Panel;
+
+/// <summary>
+/// Hikvision'ın KENDİ ANPR kayıtlarını panel için canlı akıtır: her 15 sn'de bir kameranın son-20
+/// kaydını SALT-OKUMA sorgular (hiçbir ayar değiştirilmez), yeni olanları SSE'ye iter.
+/// Kamera saati sapması periyodik ölçülür ve kayıt zamanları yerel saate düzeltilir.
+/// İlk turda mevcut (eski) kayıtlar sessizce "görüldü" sayılır — panele tarih dökülmez.
+/// </summary>
+public sealed partial class CameraRecordPoller : BackgroundService
+{
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ClockRefresh = TimeSpan.FromMinutes(10);
+
+    private readonly AnprServiceOptions _options;
+    private readonly PanelHub _hub;
+    private readonly ILogger<CameraRecordPoller> _logger;
+
+    public CameraRecordPoller(IOptions<AnprServiceOptions> options, PanelHub hub, ILogger<CameraRecordPoller> logger)
+    {
+        _options = options.Value;
+        _hub = hub;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        var cams = _options.Cameras.Where(c => !string.IsNullOrWhiteSpace(c.Ip)).ToList();
+        if (cams.Count == 0) { _logger.LogInformation("panel poller: IP'li kamera yok, kapalı"); return; }
+
+        var states = cams.Select(c => new CamState(c)).ToList();
+        while (!ct.IsCancellationRequested)
+        {
+            foreach (var st in states)
+            {
+                // Panel istemcisi yokken kamerayı yine de yoklamak zararsız ama gereksiz — abone varsa çalış.
+                if (_hub.SubscriberCount == 0) continue;
+                try { await PollOnce(st, ct); st.Ok = true; }
+                catch (Exception ex)
+                {
+                    if (st.Ok) _logger.LogWarning("[panel] {Cam} poll hatası: {Msg}", st.Cam.Id, ex.Message);
+                    st.Ok = false;
+                }
+                _hub.Publish(new { source = "status", cameraId = st.Cam.Id, cameraPollOk = st.Ok });
+            }
+            try { await Task.Delay(PollInterval, ct); } catch (OperationCanceledException) { break; }
+        }
+    }
+
+    private async Task PollOnce(CamState st, CancellationToken ct)
+    {
+        if (DateTimeOffset.UtcNow - st.ClockCheckedAt > ClockRefresh)
+        {
+            string t = await st.GetAsync("/ISAPI/System/time", ct);
+            var m = Regex.Match(t, @"<localTime>([^<]+)</localTime>");
+            if (m.Success && DateTimeOffset.TryParse(m.Groups[1].Value, out var camNow))
+                st.ClockOffset = camNow - DateTimeOffset.Now;
+            st.ClockCheckedAt = DateTimeOffset.UtcNow;
+        }
+
+        const string body = "<VehicleDetectPlateCond version=\"2.0\"><searchID>1</searchID><maxResult>20</maxResult>" +
+                            "<searchResultPosition>0</searchResultPosition></VehicleDetectPlateCond>";
+        string xml = await st.PostAsync("/ISAPI/Traffic/channels/1/vehicleDetect/plates", body, ct);
+
+        foreach (var rec in ParseRecords(xml))
+        {
+            string key = rec.Plate + "|" + rec.CaptureTimeRaw;
+            if (!st.Seen.Add(key)) continue;
+            st.SeenOrder.Enqueue(key);
+            while (st.SeenOrder.Count > 1000 && st.SeenOrder.TryDequeue(out var old)) st.Seen.Remove(old);
+
+            if (st.FirstPoll) continue; // tarihi sessizce yut
+            var localTime = rec.CaptureTime - st.ClockOffset;
+            _hub.Publish(new
+            {
+                source = "camera",
+                cameraId = st.Cam.Id,
+                plate = rec.Plate,
+                compact = rec.Plate,
+                timeIso = localTime.ToString("o"),
+            });
+        }
+        st.FirstPoll = false;
+    }
+
+    /// <summary>ISAPI yanıtından (plaka, captureTime) kayıtları — test edilebilir saf fonksiyon.</summary>
+    public static IReadOnlyList<PlateRecord> ParseRecords(string xml)
+    {
+        var plates = Regex.Matches(xml, "<plateNumber>([^<]*)</plateNumber>");
+        var times = Regex.Matches(xml, "<captureTime>([^<]*)</captureTime>");
+        var list = new List<PlateRecord>();
+        int n = Math.Min(plates.Count, times.Count);
+        for (int i = 0; i < n; i++)
+        {
+            string plate = plates[i].Groups[1].Value.Trim().ToUpperInvariant();
+            if (plate.Length == 0 || plate == "UNKNOWN") continue;
+            string raw = times[i].Groups[1].Value.Trim();
+            var m = Regex.Match(raw, @"^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})([+-]\d{2})(\d{2})?$");
+            if (!m.Success) continue;
+            var off = new TimeSpan(int.Parse(m.Groups[7].Value), m.Groups[8].Success ? int.Parse(m.Groups[8].Value) : 0, 0);
+            var dt = new DateTimeOffset(
+                int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value),
+                int.Parse(m.Groups[4].Value), int.Parse(m.Groups[5].Value), int.Parse(m.Groups[6].Value), off);
+            list.Add(new PlateRecord(plate, raw, dt));
+        }
+        return list;
+    }
+
+    public sealed record PlateRecord(string Plate, string CaptureTimeRaw, DateTimeOffset CaptureTime);
+
+    private sealed class CamState
+    {
+        public CameraOptions Cam { get; }
+        public HashSet<string> Seen { get; } = new();
+        public Queue<string> SeenOrder { get; } = new();
+        public bool FirstPoll = true;
+        public bool Ok = true;
+        public TimeSpan ClockOffset = TimeSpan.Zero;
+        public DateTimeOffset ClockCheckedAt = DateTimeOffset.MinValue;
+        private readonly HttpClient _http;
+
+        public CamState(CameraOptions cam)
+        {
+            Cam = cam;
+            var cache = new CredentialCache
+            {
+                { new Uri($"http://{cam.Ip}"), "Digest", new NetworkCredential(cam.Username, cam.Password) },
+            };
+            _http = new HttpClient(new HttpClientHandler { Credentials = cache }) { Timeout = TimeSpan.FromSeconds(10) };
+        }
+
+        public async Task<string> GetAsync(string path, CancellationToken ct)
+            => await _http.GetStringAsync($"http://{Cam.Ip}{path}", ct);
+
+        public async Task<string> PostAsync(string path, string body, CancellationToken ct)
+        {
+            using var content = new StringContent(body, Encoding.UTF8, "application/xml");
+            using var resp = await _http.PostAsync($"http://{Cam.Ip}{path}", content, ct);
+            resp.EnsureSuccessStatusCode();
+            return await resp.Content.ReadAsStringAsync(ct);
+        }
+    }
+}

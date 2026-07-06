@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Anpr.Core\Anpr.Core.csproj" />
+    <ProjectReference Include="..\Anpr.Service\Anpr.Service.csproj" />
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
   </ItemGroup>
 

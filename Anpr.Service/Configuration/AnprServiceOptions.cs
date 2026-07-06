@@ -141,6 +141,13 @@ public sealed class CameraOptions
 
     /// <summary>Tam RTSP URL. Boşsa Ip/Username/Password'dan üretilebilir.</summary>
     public string RtspUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Bu kameranın ROI çokgeni, 0-1000 normalize "x1,y1;x2,y2;..." (Hikvision şerit koordinat ölçeği —
+    /// kameranın LaneConfig noktalarından türetilebilir). Merkezi dışarıda kalan tespit OKUNMAZ.
+    /// Boş = kapalı (tüm kare). Ölçmeden etkinleştirme.
+    /// </summary>
+    public string Roi { get; set; } = string.Empty;
 }
 
 public sealed class FfmpegOptions

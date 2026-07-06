@@ -1,5 +1,6 @@
 using System.Net;
 using Anpr.Service.Configuration;
+using Anpr.Service.Panel;
 using Anpr.Service.Events;
 using Anpr.Service.Workers;
 
@@ -55,6 +56,12 @@ if (!string.IsNullOrWhiteSpace(opts.WebhookUrl))
         sp.GetRequiredService<ILogger<WebhookEventSink>>()));
 }
 
+// --- Canlı karşılaştırma paneli ---
+builder.Services.AddSingleton<PanelHub>();
+builder.Services.AddSingleton<RoiStore>();
+builder.Services.AddSingleton<IEventSink, PanelEventSink>();
+builder.Services.AddHostedService<CameraRecordPoller>();
+
 // --- Kamera yöneticisi (hem singleton hem hosted service) ---
 builder.Services.AddSingleton<AnprCameraSupervisor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprCameraSupervisor>());
@@ -100,6 +107,66 @@ app.MapGet("/events/recent", (InMemoryEventStore store, int? count) =>
 {
     var events = store.GetRecent(count ?? 50);
     return Results.Json(new { total = store.TotalCount, returned = events.Count, events });
+});
+
+// --- Canlı karşılaştırma paneli ---
+app.MapGet("/panel", () => Results.Content(PanelPage.Html, "text/html; charset=utf-8"));
+
+app.MapGet("/api/stream", async (HttpContext ctx, PanelHub hub) =>
+{
+    ctx.Response.Headers.ContentType = "text/event-stream";
+    ctx.Response.Headers.CacheControl = "no-cache";
+    using var sub = hub.Subscribe();
+    await ctx.Response.WriteAsync(": bağlı\n\n", ctx.RequestAborted);
+    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+    try
+    {
+        await foreach (var msg in sub.Reader.ReadAllAsync(ctx.RequestAborted))
+        {
+            await ctx.Response.WriteAsync($"data: {msg}\n\n", ctx.RequestAborted);
+            await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+        }
+    }
+    catch (OperationCanceledException) { /* istemci ayrıldı */ }
+});
+
+app.MapGet("/api/snapshot/{cameraId}", (string cameraId, AnprCameraSupervisor sup) =>
+{
+    var w = sup.Workers.FirstOrDefault(w => w.CameraId == cameraId);
+    var jpeg = w?.LastFrameJpeg;
+    return jpeg == null ? Results.StatusCode(503) : Results.Bytes(jpeg, "image/jpeg");
+});
+
+app.MapGet("/api/detections/{cameraId}", (string cameraId, AnprCameraSupervisor sup) =>
+{
+    var w = sup.Workers.FirstOrDefault(w => w.CameraId == cameraId);
+    if (w == null) return Results.NotFound();
+    return Results.Json(new
+    {
+        cameraId,
+        roi = w.CurrentRoi,
+        boxes = w.LastBoxes.Select(b => new { x = b.X, y = b.Y, w = b.Width, h = b.Height }),
+    });
+});
+
+app.MapGet("/api/roi/{cameraId}", (string cameraId, AnprCameraSupervisor sup, RoiStore store) =>
+{
+    var w = sup.Workers.FirstOrDefault(w => w.CameraId == cameraId);
+    return Results.Json(new { cameraId, roi = w?.CurrentRoi ?? store.LoadOrDefault(cameraId) });
+});
+
+app.MapPut("/api/roi/{cameraId}", async (string cameraId, HttpRequest req, AnprCameraSupervisor sup, RoiStore store) =>
+{
+    using var reader = new StreamReader(req.Body);
+    string body = await reader.ReadToEndAsync();
+    string roi = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(body)?.GetValueOrDefault("roi") ?? "";
+    // Doğrulama: boş = temizle (geçerli); doluysa parse edilebilir olmalı.
+    if (roi.Length > 0 && Anpr.Core.Imaging.RoiPolygon.Parse(roi) == null)
+        return Results.BadRequest(new { error = "geçersiz ROI (en az 3 nokta, 'x,y;x,y;...' 0-1000)" });
+    store.Save(cameraId, roi);
+    var w = sup.Workers.FirstOrDefault(w => w.CameraId == cameraId);
+    w?.ApplyRoi(roi);
+    return Results.Json(new { ok = true, cameraId, roi, applied = w != null });
 });
 
 app.Run();

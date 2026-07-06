@@ -469,6 +469,7 @@ AnprEngine MakeEngine(BenchOptions o) => AnprEngine.Create(new AnprOptions
     ApplyTurkishValidation = true,
     DeskewPlates = o.Deskew,
     MinPlateWidthRatio = o.MinPlateW,
+    RoiPolygon = o.Roi,
 });
 
 static IReadOnlyList<PlateReading> SafeRecognize(AnprEngine e, string path)
@@ -577,6 +578,7 @@ BenchOptions ParseArgs(string[] a)
         CharVote = (ArgVal(a, "--charvote") ?? "true") != "false",
         Deskew = (ArgVal(a, "--deskew") ?? "false") == "true",
         MinPlateW = float.Parse(ArgVal(a, "--minwidth") ?? "0", CultureInfo.InvariantCulture),
+        Roi = ArgVal(a, "--roi") ?? "",
         Constrained = (ArgVal(a, "--constrained") ?? "true") != "false",
         MergeProvince = (ArgVal(a, "--mergeprovince") ?? "true") != "false",
         Fuzzy = int.Parse(ArgVal(a, "--fuzzy") ?? "0"),
@@ -608,6 +610,7 @@ sealed class BenchOptions
     public double Fps = 3, SettleSec = 3, DedupSec = 8;
     public float EarlyEmit = 0;
     public string Trace = "";
+    public string Roi = "";
     public float MinConf, MinOcr;
     public int MinConfirm = 2;
     public bool CharVote = true;

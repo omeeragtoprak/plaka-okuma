@@ -16,6 +16,8 @@ public sealed class AnprEngine : IDisposable
     private readonly AnprOptions _options;
     private readonly LicensePlateDetector _detector;
     private readonly LicensePlateRecognizer _recognizer;
+    private volatile RoiPolygon? _roi;
+    private volatile string _roiSpec;
     private bool _disposed;
 
     private AnprEngine(AnprOptions options, LicensePlateDetector detector, LicensePlateRecognizer recognizer)
@@ -23,7 +25,23 @@ public sealed class AnprEngine : IDisposable
         _options = options;
         _detector = detector;
         _recognizer = recognizer;
+        _roi = RoiPolygon.Parse(options.RoiPolygon);
+        _roiSpec = options.RoiPolygon ?? "";
     }
+
+    /// <summary>Geçerli ROI tanımı ("" = kapalı).</summary>
+    public string RoiSpec => _roiSpec;
+
+    /// <summary>ROI'yi çalışırken değiştirir (panelden). Geçersiz/boş tanım = filtre kapalı. Thread-safe (volatile swap).</summary>
+    public void SetRoi(string? spec)
+    {
+        _roi = RoiPolygon.Parse(spec);
+        _roiSpec = _roi != null ? spec! : "";
+    }
+
+    // ROI tanımlıysa tespit merkezi çokgen içinde olmalı; tanımsızsa her tespit geçer.
+    private bool InRoi(PlateDetection det, int imgW, int imgH)
+        => _roi == null || _roi.ContainsPixel(det.X + det.Width / 2f, det.Y + det.Height / 2f, imgW, imgH);
 
     /// <summary>Modelin beklediği kare dedektör giriş boyutu (ör. 384).</summary>
     public int DetectorInputSize => _detector.InputSize;
@@ -72,6 +90,8 @@ public sealed class AnprEngine : IDisposable
             if (det.Confidence < _options.MinConfidence) continue;
             // Tetik bölgesi: çok küçük/uzak plakalara OCR yapma.
             if (det.Width < minPlateW) continue;
+            // ROI: kapsam dışı tespitlere OCR yapma (kapsam hizalama + CPU tasarrufu).
+            if (!InRoi(det, image.Width, image.Height)) continue;
 
             var rect = ExpandAndClamp(det, image.Width, image.Height, _options.CropPaddingRatio);
             if (rect.Width < 2 || rect.Height < 2) continue;
@@ -107,6 +127,7 @@ public sealed class AnprEngine : IDisposable
         {
             if (det.Confidence < _options.MinConfidence) continue;
             if (det.Width < minPlateW) continue;
+            if (!InRoi(det, image.Width, image.Height)) continue;
             var rect = ExpandAndClamp(det, image.Width, image.Height, _options.CropPaddingRatio);
             if (rect.Width < 2 || rect.Height < 2) continue;
             using var crop = SkiaImaging.ExtractSubset(image, rect);

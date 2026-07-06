@@ -34,6 +34,14 @@ public sealed class CameraWorker : IAsyncDisposable
     public int RestartCount => _frameSource.RestartCount;
     public long FramesProcessed { get; private set; }
     public long EventsEmitted { get; private set; }
+
+    // Panel: son işlenen kare (ffmpeg'den gelen JPEG bytes — kopyasız) + son tespit kutuları.
+    private volatile byte[]? _lastFrameJpeg;
+    private volatile IReadOnlyList<PlateBox>? _lastBoxes;
+    public byte[]? LastFrameJpeg => _lastFrameJpeg;
+    public IReadOnlyList<PlateBox> LastBoxes => _lastBoxes ?? Array.Empty<PlateBox>();
+    public string CurrentRoi => _engine.RoiSpec;
+    public void ApplyRoi(string? spec) => _engine.SetRoi(spec);
     public DateTimeOffset? LastEventUtc { get; private set; }
     public string? LastPlate { get; private set; }
 
@@ -112,6 +120,8 @@ public sealed class CameraWorker : IAsyncDisposable
     {
         FramesProcessed++;
         var readings = _engine.Recognize(frame);
+        _lastFrameJpeg = frame;
+        _lastBoxes = readings.Select(r => r.Box).ToArray();
 
         foreach (var r in readings)
         {
