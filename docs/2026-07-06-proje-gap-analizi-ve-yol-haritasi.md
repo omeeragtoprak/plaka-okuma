@@ -1,0 +1,115 @@
+# OtoparkAnpr — Proje Geneli Gap Analizi ve Yol Haritası (Karar Dokümanı)
+
+Tarih: 2026-07-06 · Kapsam: 2026-07-01 → 07-06 tüm ölçümler · Kurallar: **Türkiye plakaları + zayıf CPU
++ otopark exe entegrasyonu** · Referans dokümanlar: [gece raporu](2026-07-03-gece-calismasi-raporu.md),
+[fine-tune runbook](finetune-runbook.md), [dağıtım listesi](deployment-checklist.md)
+
+---
+
+## 1. Yönetici Özeti
+
+**Soru:** Kendi CPU-ANPR yazılımımız, Hikvision kameranın yerleşik ANPR'ını ikame edebilir mi?
+
+**Cevap: Evet — tetik-bölgesi kapsamı ve izleme şartıyla.** 4 günlük kamera-referanslı ölçümlerde kendi
+modelimiz (sahaya fine-tune edildikten sonra) kameranın yakaladığı araçların **gündüz %85'ini birebir**
+(canlı akşam doğrulamasında 8/9), **gece %84'ünü** doğru okuyor; 24+ saat kesintisiz canlı çalışmada
+**0 çökme**, bellek sınırlı (150-300MB), gecikme zayıf-CPU bütçesinde (Mac'te 27.6 ms/kare). Kameranın
+kalan üstünlüğü ağırlıkla **donanımsal** (plakaya-optimize pozlama) ve **koşulsal** (alçak güneş/gece).
+En kritik bilinmeyen **hedef zayıf PC'nin gerçek hızı** — dağıtım Faz-1 pilotuyla doğrulanmalı.
+
+Ana kazanımlar: sahaya özel **fine-tune'lu model** (kamera kayıtlarıyla otomatik etiketlenen 1468
+kırpıntı/127 plakayla eğitildi, her koşulda ölçülü kazanç), **çift-emit kök nedeni** bulunup düzeltildi,
+kendi kendine büyüyen **veri fabrikası** ve tek-komut **regresyon bataryası** kuruldu.
+
+## 2. Kanıt Tabanı
+
+### 2.1 Koşula bağlı parity (kamera = %100 referans, birebir eşleşme)
+
+| Koşul | Eski model | Fine-tune (erz) | n | Not |
+|---|---|---|---|---|
+| Öğleden sonra (16:10) | %81 | **%85** | 26 | GA %66-94 |
+| Canlı akşam (4h soak) | — | **%89 (8/9)** | 9 | tek "kaçan" kameranın kendi çift-kaydı |
+| Sabah alçak güneş (Cuma 08:35) | %64 | — | 22 | eski modelle |
+| Sabah alçak güneş (Pzt 08:31) | %71 | %71 | 14 | **berabere**; aynı 2 aracı ikisi de kaçırdı |
+| Gece/IR (kırpıntı-exact) | %75.2 | **%84.0** | 125 kırpıntı | görülmemiş plakalarda %83→%86.4 |
+
+*Küçük n'lerde Wilson %95 GA geniştir; oranlar gösterge. Tüm karşılaştırmalar aynı karelerde (adil A/B).*
+
+### 2.2 Fine-tune etkisi (bağımsız setlerde, aynı gecikmede)
+
+| Ölçüm | Önce | Sonra |
+|---|---|---|
+| val kırpıntı-exact (n=188, plaka-ayrık) | %67.0 | **%75.0** |
+| live1h recall (101 araç) | 86/101 | **87/101** |
+| live1h yanlış-emit | 42 | **31 (−%26)** |
+| ms/kare | 27.6 | **27.6** |
+
+### 2.3 Stabilite ve kaynak
+
+- **24+ saat canlı soak, 0 restart** (10h + 4h + 10h; fps=2, 2 kamera).
+- RSS 150-300MB salınımlı, monoton büyüme yok → **bellek sızıntısı yok** (10 saatlik analiz).
+- CPU (Mac): ort %13, boşta ~%4.5. Uyarlanabilir fps çalışıyor.
+- Yazılım düzeltmeleri ölçümle doğrulandı: varyant-seti + köprü-birleştirme → diag4 gürültü 17→15,
+  live1h yanlış-emit 46→42, recall değişmedi; 49/49 birim test.
+
+### 2.4 Ölçümle ELENENLER (yanlış yatırımı önleyen kanıt)
+
+fps artırma (gürültüyü 2-3× artırıyor, kaçanları kurtarmıyor) · yolo-256/512 · büyük OCR (s_v2) ·
+INT8 (Mac'te hız kazancı yok; ConvInteger C#'ta desteklenmiyor) · deskew · piksel-füzyon · dedup
+20/30/90 · güven-kapılı erken emit · spinning=false · il-birleştirme kimliği.
+
+## 3. Gap Envanteri
+
+| # | Gap | Kanıt | Kök neden | Kapatma yolu | Maliyet | Etki | Öncelik |
+|---|---|---|---|---|---|---|---|
+| a | **Gece/IR** | gece exact %84 (fine-tune sonrası; önce %75) | karanlık/far parlaması; kamera IR-optimize pozluyor | gece kırpıntısı birikimi (şu an ~130) → yeniden fine-tune; kamera gece-ANPR'ını ISAPI'den yedek kaynak alma opsiyonu | düşük (hat hazır) | orta | **1** |
+| b | **Sabah alçak güneş** | Cuma %64 (eski), Pzt %71=%71 (İKİ model de) | doğu güneşi parlaması — model-bağımsız optik sorun | sabah kırpıntısı birikimi + fine-tune; kalıcı kısmı donanımsal | düşük | orta | **2** |
+| c | **Donanımsal pozlama farkı** | zor plakalar iki modelde de aynı kaçıyor (25AFK950, 34NJY035 çapraz-kamera) | kamera plaka-bölgesine pozlama/enstantane optimize ediyor; biz genel akış karesi alıyoruz | **kapatılamaz** (yazılımla); azaltım: tetik-bölgesi (yakın=iyi kare) + veri birikimi | — | düşük-orta | kabul |
+| d | **Hedef-PC bilinmeyenleri** | hız katsayısı x3-6 TAHMİN; INT8/spinning Mac'te nötr | henüz hedef donanımda ölçüm yok | Faz-1 pilot: `regression.sh` + deployment-checklist ölçüm sırası | 1 gün | **yüksek** | **1** |
+| e | **Kapsam farkı (şerit vs tüm-kare)** | "fazla" emitlerin ~yarısı gerçek ama şerit-dışı (park/kuyruk; görsel kanıtlı, halüsinasyon=0) | kamera şerit-tetikli, biz tüm kareyi okuyoruz | ürün kararı: exe bariyer mantığı için `MinPlateWidthRatio`/ROI (sahada ~0.03-0.04) | yarım gün | orta | **2** |
+| f | **Köprüsüz varyant zincirleri** | diag4'te ~5-6 çift-emit kaldı (köprü okuması hiç oluşmayan zincirler) | değişik açılardan tutarlı-yanlış okumalar ayrı iz açıyor | veri büyüdükçe azalır (daha iyi okuma); agresif birleştirme DENENDİ ve recall'e zarar verdi → mevcut denge korunur | — | düşük | izle |
+| g | **Tekrarlayan zor plakalar** | `25ACV952` her oturumda sorunlu | muhtemelen kirli/eğik fiziksel plaka | sahada fiziksel kontrol; genel çözüm değil | — | düşük | izle |
+| h | **Veri seti sınırları** | 127 plaka, tek saha, tek mevsim (yaz), val n=188 | 4 günlük birikim | hasat sürsün (kış/yağış/kar kritik!); aylık re-tune; val büyüsün | düşük (otomatik) | orta-yüksek (mevsimsel) | **2** |
+
+## 4. Risk Matrisi
+
+| Risk | Olasılık | Etki | Azaltım |
+|---|---|---|---|
+| Hedef PC beklenenden yavaş (fps=2 bütçeye sığmaz) | orta | yüksek | Faz-1 pilot ölçümü; Fps=1 geri-çekilme (bariyer beklemesi recall'ü korur); INT8 orada yeniden denenir |
+| Gece/kış koşullarında regresyon | orta | orta | koşul-etiketli hasat + aylık `regression.sh`; kamera-ANPR ISAPI yedeği |
+| Kamera firmware/ISAPI değişikliği (poll-truth kırılır) | düşük | orta | harness kamera-bağımsız RTSP ile çalışır; poll sadece etiketleme/izleme için |
+| Tek-model bağımlılığı (erz kötüleşirse) | düşük | düşük | eski global model repo'da; 1 satır rollback; regression.sh kapısı |
+| Veri drift (yeni plaka fontu/formatı) | düşük | orta | TR normalizasyon merkezi; hasat sürekli taze örnek toplar |
+| Bellek/kararlılık uzun dönem | düşük | orta | 24h kanıtlı; hedefte ilk hafta RSS izleme (checklist'te) |
+
+## 5. Yol Haritası
+
+**Faz 1 — Hedef-PC pilotu (1-2 gün):** deployment-checklist sırasıyla: ms/kare ölç → fps kararını
+doğrula → INT8/spinning yeniden dene → `MinPlateWidthRatio` saha ayarı → 1 günlük gölge-çalışma
+(kamera ile yan yana, `camera_compare` kabulü: gündüz birebir ≥%80).
+
+**Faz 2 — Exe entegrasyonu (2-3 gün):** `/events/recent` veya webhook bağlantısı → bariyer mantığı
+kapsam kararı (ROI) → canlı izleme panosu/log → 1 haftalık paralel çalışma (kamera referanslı haftalık
+rapor).
+
+**Faz 3 — Sürekli iyileştirme (aylık döngü):** hasat (özellikle gece + kötü hava) → veri ≥%25 büyüyünce
+re-fine-tune → `regression.sh` kapısı (tüm setlerde gerileme yoksa yayınla) → koşul tablosu güncelle.
+Kış gelmeden kar/yağış verisi toplamak **kritik**.
+
+## 6. Ekler
+
+### 6.1 Metodoloji dersleri (tekrar-üretilebilirlik için)
+- Kamera ISAPI araması **son ~20 kaydı** döndürür (pozisyon/zaman filtresi çalışmaz) → gerçek-değer
+  yalnız POLL birikimiyle kurulur; karşılaştırmada **zaman filtresi + saat-farkı düzeltmesi şart**
+  (kamera ~+61-63 sn ileri). Filtresiz karşılaştırma %38 gibi sahte-düşük sonuç verdi.
+- Emit-anı ≠ görülme-anı: görsel doğrulama kırpıntıları **son-görülme** anından alınmalı (ilk montaj
+  bu yüzden yanıltmıştı; düzeltilince "gürültü"nün gerçek plakalar olduğu görüldü).
+- Küçük n'de tek pencere karar veremez (Cuma %64 vs Pzt %71 aynı koşul) → koşul başına birden çok
+  pencere + GA raporlama.
+- Torch-backend ONNX export bu mimaride çalışmaz; TF backend + `--no-simplify` + statik batch şart.
+
+### 6.2 Doküman haritası
+- Ölçüm günlüğü ve tüm A/B'ler: `docs/2026-07-03-gece-calismasi-raporu.md`
+- Eğitim akışı: `docs/finetune-runbook.md` · Dağıtım: `docs/deployment-checklist.md`
+- Araçlar: `scripts/camera_compare.py`, `scripts/regression.sh`, `scripts/autolabel.py`, `Anpr.Bench`
+- Veri: `dataset/finetune` (1468 kırpıntı/127 plaka), `dataset/diag4` (kamera-etiketli referans set)
