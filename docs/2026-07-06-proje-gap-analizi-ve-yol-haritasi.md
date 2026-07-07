@@ -122,8 +122,12 @@ başarısı değil, kameranın OKUYABİLDİĞİ gece plakalarında parity).
 Fps=2 + boşta-1fps aktivasyonuyla geçiş başına 1-2 kare kalıyor → tek bulanık okuma. Ham sabah-koşusu
 taraması (n=18 giriş): fps 1→2→5'te birebir 7→10→11 (fps artışı ROI'li dünyada İŞE YARIYOR — ROI'suz
 dünyadaki eski "fps işe yaramaz" bulgusunun takas dengesi ROI ile değişti; ROI kapsam-dışı OCR'ı kestiği
-için kare maliyeti de düştü). Kapı-trafiği filtreli kesin tarama sürüyor; sonuçla Fps önerisi
-güncellenecek (aday: ROI'li kurulumda Fps=3-4, IdleFps=2).
+için kare maliyeti de düştü). Kapı-trafiği filtreli kesin tarama SONUCU: giriş 5 kapı aracında fps 1-3 → 4/5, **fps=5 → 5/5**
+(hızlı araç kurtuldu; bedel varyant-gürültüsü 13→19). Çıkıştaki 4 "kaçan" görsel teşhiste ÇIKIŞ
+KORİDORUNDA HİÇ GÖRÜNMEYEN uzun-menzil yukarı-yol okumaları çıktı (kameranın uzak okuma sınıfı;
+bizim kaçağımız değil). **Uygulanan karar: `Fps=4`, `IdleFps=2`** (ROI kapsam-dışı OCR'ı kestiği için
+kare maliyeti düştü; Mac'te bütçe rahat, hedef-PC pilotunda yeniden doğrulanacak). Sınıflandırıcıya
+not: cadde imzasına ek 'tek-kamera uzun-menzil' sınıfı var (koridor-boş görsel doğrulamayla).
 
 **Operasyonel bulgular (canlı işletmeden):**
 - **RTSP oturum çekişmesi:** servis + hasat + yoğun-yakalama aynı kameradan eşzamanlı ana-akış isteyince
