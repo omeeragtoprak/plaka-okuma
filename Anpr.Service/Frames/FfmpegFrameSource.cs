@@ -43,7 +43,20 @@ public sealed class FfmpegFrameSource : IFrameSource
         _logger = logger;
     }
 
-    public bool IsConnected => _connected;
+    // "Bağlı" = süreç canlı VE kare akışı taze. Asılı ffmpeg'de (süreç var, kare yok) sağlık
+    // yanlış-pozitif vermesin diye kare yaşına bağlanır (2026-07-07 canlı vakası: 3 saat bayat
+    // kaynak 'connected=true' görünüyordu).
+    public bool IsConnected
+    {
+        get
+        {
+            if (!_connected) return false;
+            var last = _lastFrameUtc;
+            if (last == null) return false;
+            double staleSec = Math.Max(30, _opts.NoFrameTimeoutSeconds * 3);
+            return (DateTimeOffset.UtcNow - last.Value).TotalSeconds < staleSec;
+        }
+    }
     public DateTimeOffset? LastFrameUtc => _lastFrameUtc;
     public long FramesReceived => Interlocked.Read(ref _framesReceived);
     public int RestartCount => _restartCount;
@@ -72,13 +85,18 @@ public sealed class FfmpegFrameSource : IFrameSource
                 _logger.LogInformation("[{Cam}] ffmpeg başlatıldı (pid {Pid})", _cameraId, proc.Id);
 
                 _ = PumpStderrAsync(proc, attemptCts.Token);
-                watchdog = WatchdogAsync(proc, attemptCts.Token);
+                watchdog = WatchdogAsync(proc, attemptCts);
 
                 await ReadFramesAsync(proc.StandardOutput.BaseStream, attemptCts.Token);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 break;
+            }
+            catch (OperationCanceledException)
+            {
+                // Bekçi iptali (asılı ffmpeg): normal kopma gibi ele al -> yeniden bağlan.
+                _logger.LogWarning("[{Cam}] bekçi okuma döngüsünü sonlandırdı (asılı akış)", _cameraId);
             }
             catch (Exception ex)
             {
@@ -236,8 +254,9 @@ public sealed class FfmpegFrameSource : IFrameSource
         _gotFrameThisAttempt = true;
     }
 
-    private async Task WatchdogAsync(Process proc, CancellationToken attemptToken)
+    private async Task WatchdogAsync(Process proc, CancellationTokenSource attemptCts)
     {
+        var attemptToken = attemptCts.Token;
         try
         {
             while (!attemptToken.IsCancellationRequested)
@@ -249,6 +268,10 @@ public sealed class FfmpegFrameSource : IFrameSource
                     _logger.LogWarning("[{Cam}] {Sec}s boyunca kare gelmedi; ffmpeg yeniden başlatılıyor",
                         _cameraId, _opts.NoFrameTimeoutSeconds);
                     TryKill(proc);
+                    // KRİTİK: kill asılı boruyu açmayabilir (2026-07-07 vakası: okuma sonsuz bloklu
+                    // kaldı, bekçi dönmüştü, kaynak 'bağlı' görünürken 3 saat kare gelmedi).
+                    // Okumayı token üzerinden GARANTİLİ sonlandır -> finally -> restart döngüsü işler.
+                    try { attemptCts.Cancel(); } catch (ObjectDisposedException) { /* yarış: attempt bitti */ }
                     return;
                 }
             }
