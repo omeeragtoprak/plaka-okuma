@@ -48,6 +48,7 @@ public static class PanelPage
   .row .meta { color:var(--dim); font-size:12px; margin-left:auto; text-align:right; }
   .row.obs { opacity:.72; }
   .scopetag { font-size:10.5px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:1px 7px; }
+  .thumb { height:26px; border-radius:4px; border:1px solid var(--line); display:block; }
   .m-green { border-left-color:var(--green); } .m-yellow { border-left-color:var(--yellow); }
   .m-red { border-left-color:var(--red); } .m-blue { border-left-color:var(--blue); }
   .hint { color:var(--dim); font-size:12px; }
@@ -112,6 +113,7 @@ function push(f,side,rec,key){ if(f.keys.has(key))return; f.keys.add(key);
     if(compact(r.plate)===pc){
       r.t=Math.max(r.t,rec.t); r.n=(r.n||1)+1;
       if(rec.conf!=null&&(r.conf==null||rec.conf>r.conf))r.conf=rec.conf;
+      if(rec.ev)r.ev=rec.ev;
       if(rec.scope==="roi")r.scope="roi"; // bölge-içi okuma gözlemi yükseltir
       return;
     }
@@ -153,7 +155,8 @@ function row(r,side){
   const time=new Date(r.t).toLocaleTimeString("tr-TR");
   const tag=side==="ours"&&r.scope==="gozlem"?' <span class="scopetag">uzak</span>':"";
   const times=r.n>1?" ×"+r.n:"";
-  d.innerHTML=`<span class="plate">${r.plate}</span>${tag}
+  const thumb=side==="ours"&&r.ev?`<a href="/${r.ev}" target="_blank"><img class="thumb" src="/${r.ev}" alt=""></a>`:"";
+  d.innerHTML=`<span class="plate">${r.plate}</span>${tag}${thumb}
     <span class="meta">${time}${times}${side==="ours"&&r.conf!=null?"<br>güven "+r.conf:""}</span>`;
   return d;
 }
@@ -180,7 +183,7 @@ function connect(){
       $("camBadge").innerHTML='kamera: <b style="color:var(--'+(m.cameraPollOk?'green':'red')+')">'+(m.cameraPollOk?'ok':'hata')+'</b>';
       return; }
     const f=ensure(m.cameraId);
-    const rec={plate:m.plate,t:Date.parse(m.timeIso),conf:m.conf,scope:m.scope};
+    const rec={plate:m.plate,t:Date.parse(m.timeIso),conf:m.conf,scope:m.scope,ev:m.ev};
     push(f, m.source==="camera"?"cam":"ours", rec, m.source+"|"+m.plate+"|"+m.timeIso);
     if(m.cameraId===cam)render();
   };
@@ -193,7 +196,7 @@ async function backfill(){
     // API en-yeni-önce döner; tampon kronolojik tutulur (render sonda ters çevirir) -> eskiden yeniye it.
     for(const e of (ev.events||[]).slice().reverse()){
       const f=ensure(e.cameraId);
-      push(f,"ours",{plate:e.plate,t:Date.parse(e.timestamp),conf:Math.round(e.ocrConfidence*100)/100,scope:e.scope},
+      push(f,"ours",{plate:e.plate,t:Date.parse(e.timestamp),conf:Math.round(e.ocrConfidence*100)/100,scope:e.scope,ev:e.evidencePath},
            "ours|"+e.plate+"|"+e.timestamp);
     }
   }catch{}

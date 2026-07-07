@@ -20,6 +20,7 @@ public sealed class PanelEventSink : IEventSink
             compact = e.PlateCompact,
             timeIso = e.Timestamp.ToLocalTime().ToString("o"),
             conf = Math.Round(e.OcrConfidence, 2),
+            ev = e.EvidencePath,
             box = new { x = e.Box.X, y = e.Box.Y, w = e.Box.Width, h = e.Box.Height },
         });
         return Task.CompletedTask;

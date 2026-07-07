@@ -135,6 +135,16 @@ public sealed class AnprServiceOptions
     /// <summary>Uzlaşı OCR güveni bu eşiğin ALTINDAysa füzyon denenir (yüksek güvenli emitlere dokunulmaz).</summary>
     public float FusionTriggerOcr { get; set; } = 0.85f;
 
+    /// <summary>
+    /// Kanıt kırpıntısı: her olayda, izin en yüksek güvenli plaka kırpıntısı JPEG olarak evidence/
+    /// klasörüne kaydedilir ve olayda yolu taşınır (panelde küçük resim; ihtilaflarda gözle karar).
+    /// Disk FIFO ile sınırlanır (EvidenceMaxFiles).
+    /// </summary>
+    public bool EvidenceCrops { get; set; } = true;
+
+    /// <summary>evidence/ klasöründe tutulacak azami dosya sayısı (aşınca en eskiler silinir).</summary>
+    public int EvidenceMaxFiles { get; set; } = 3000;
+
     public int HttpPort { get; set; } = 8080;
 
     /// <summary>HTTP dinleme adresi. 0.0.0.0 = tüm arayüzler (LAN'daki web app erişebilsin).</summary>

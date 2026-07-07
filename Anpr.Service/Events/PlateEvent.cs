@@ -30,4 +30,7 @@ public sealed record PlateEvent
     /// "gozlem" = ROI dışı cadde/uzak okuma (yalnız izleme/karşılaştırma — karar üretmez).
     /// </summary>
     public string Scope { get; init; } = "roi";
+
+    /// <summary>Kanıt kırpıntısının servis-köküne göre yolu (ör. "evidence/xxx.jpg"). Yoksa null.</summary>
+    public string? EvidencePath { get; init; }
 }

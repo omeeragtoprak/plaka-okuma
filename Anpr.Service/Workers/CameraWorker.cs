@@ -141,15 +141,15 @@ public sealed class CameraWorker : IAsyncDisposable
         FramesProcessed++;
 
         IReadOnlyList<PlateReading> readings;
-        if (_options.MultiFrameFusion)
+        if (_options.MultiFrameFusion || _options.EvidenceCrops)
         {
             var withCrops = _engine.RecognizeWithCrops(frame);
             var list = new List<PlateReading>(withCrops.Count);
             foreach (var (r, crop) in withCrops)
             {
                 list.Add(r);
-                // Füzyon için yalnız bölge-içi geçerli okumaların kırpıntıları saklanır (sahiplenilir).
-                if (r.InZone && r.IsValidTr && crop != null) StoreCrop(r, crop, now);
+                // Geçerli okumaların kırpıntıları saklanır (füzyon + kanıt görüntüsü için; sahiplenilir).
+                if (r.IsValidTr && crop != null) StoreCrop(r, crop, now);
                 else crop?.Dispose();
             }
             readings = list;
@@ -244,6 +244,47 @@ public sealed class CameraWorker : IAsyncDisposable
         }
     }
 
+    // İzin en yüksek güvenli kırpıntısını evidence/ altına JPEG kaydeder; göreli yolu döner.
+    private int _evidenceCount = -1;
+    private string? SaveEvidence(PlateReading best, DateTimeOffset now)
+    {
+        try
+        {
+            var bucket = FindBucket(Compact(best.Text));
+            if (bucket == null || bucket.Crops.Count == 0) return null;
+
+            var top = bucket.Crops[0];
+            for (int i = 1; i < bucket.Crops.Count; i++)
+                if (bucket.Crops[i].Conf > top.Conf) top = bucket.Crops[i];
+
+            string dir = Path.Combine(AppContext.BaseDirectory, "evidence");
+            Directory.CreateDirectory(dir);
+            string name = $"{now.ToLocalTime():yyyyMMdd-HHmmss}_{_camera.Id}_{Compact(best.Text)}.jpg";
+
+            using var img = SKImage.FromBitmap(top.Bmp);
+            using var data = img.Encode(SKEncodedImageFormat.Jpeg, 85);
+            File.WriteAllBytes(Path.Combine(dir, name), data.ToArray());
+
+            // FIFO disk sınırı: her 100 kayıtta bir en eskileri buda.
+            if (_evidenceCount < 0 || ++_evidenceCount % 100 == 0)
+            {
+                var files = new DirectoryInfo(dir).GetFiles("*.jpg");
+                _evidenceCount = files.Length;
+                int excess = files.Length - Math.Max(100, _options.EvidenceMaxFiles);
+                if (excess > 0)
+                    foreach (var f in files.OrderBy(f => f.LastWriteTimeUtc).Take(excess))
+                        try { f.Delete(); } catch { /* yoksay */ }
+            }
+
+            return "evidence/" + name;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[{Cam}] kanıt kaydı hatası: {Msg}", _camera.Id, ex.Message);
+            return null;
+        }
+    }
+
     private void CleanCropBuckets(DateTimeOffset now)
     {
         if (_cropBuckets.Count == 0) return;
@@ -280,6 +321,9 @@ public sealed class CameraWorker : IAsyncDisposable
 
     private void Emit(PlateReading best, DateTimeOffset now, string scope)
     {
+        // Kanıt kırpıntısı: füzyon bucket'ı bozmadan ÖNCE en iyi kırpıntıyı JPEG'e al.
+        string? evidence = _options.EvidenceCrops ? SaveEvidence(best, now) : null;
+
         // Bulanık/düşük güvenli uzlaşı: çok-kareli füzyonla ikinci şans (yalnız bölge-içi, araç başına 1 kez).
         if (scope == "roi" && _options.MultiFrameFusion && best.OcrConfidence < _options.FusionTriggerOcr)
             best = TryFuse(best) ?? best;
@@ -305,6 +349,7 @@ public sealed class CameraWorker : IAsyncDisposable
             OcrConfidence = best.OcrConfidence,
             Box = best.Box,
             Scope = scope,
+            EvidencePath = evidence,
         };
 
         EventsEmitted++;
