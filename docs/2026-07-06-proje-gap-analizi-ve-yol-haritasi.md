@@ -109,6 +109,32 @@ recall çöküşü) → elle çizim doğru yol. Gap (g) örneği yine görüldü
 (hepsi varyant-kopyası, gap-f). Derin-testte "kaçan" görünen 25AFK950 bu kez kapıdan girdi ve birebir
 okundu — cadde-geçişi sınıflandırmasını doğrular. Bariyer kapsamında kamera-parity bu pencerede TAM.
 
+## 5c. Güncelleme (2026-07-07 sabahı): Gece gerçeği, hızlı-araç hipotezi ve operasyonel bulgular
+
+**Gece (20:37→06:35, ROI aktif, ~4 kapı aracı):** biz 1 birebir (`25AFM687` — haftanın zor plakası,
+gece 0.94 güvenle doğru!) + 2-3 kaçak. AMA kamera tarafı: **15+ UNKNOWN kaydı** (araç algılandı, plaka
+OKUNAMADI), kendi yanlış-okuması (`25DG000`) ve kendi iç çelişkisi (aynı araca `25FC433`/`25FC493`,
+53 sn arayla iki kamera). **Gece iki sistem için de zayıf** — kameranın gece "üstünlüğü" UNKNOWN seli
+görülünce büyük ölçüde görünürlük yanılsaması (gap-a değerlendirmesi güncellendi: hedef mutlak gece
+başarısı değil, kameranın OKUYABİLDİĞİ gece plakalarında parity).
+
+**Hızlı-araç hipotezi (kullanıcı gözlemi, 07.07):** ROI daralınca hızlı aracın ROI-içi süresi kısalıyor;
+Fps=2 + boşta-1fps aktivasyonuyla geçiş başına 1-2 kare kalıyor → tek bulanık okuma. Ham sabah-koşusu
+taraması (n=18 giriş): fps 1→2→5'te birebir 7→10→11 (fps artışı ROI'li dünyada İŞE YARIYOR — ROI'suz
+dünyadaki eski "fps işe yaramaz" bulgusunun takas dengesi ROI ile değişti; ROI kapsam-dışı OCR'ı kestiği
+için kare maliyeti de düştü). Kapı-trafiği filtreli kesin tarama sürüyor; sonuçla Fps önerisi
+güncellenecek (aday: ROI'li kurulumda Fps=3-4, IdleFps=2).
+
+**Operasyonel bulgular (canlı işletmeden):**
+- **RTSP oturum çekişmesi:** servis + hasat + yoğun-yakalama aynı kameradan eşzamanlı ana-akış isteyince
+  kamera oturum limiti serviste kilitlenme yarattı (giriş kaynağı 70 restart, akış dondu). Dağıtım notu:
+  servis çalışırken aynı kameranın ana akışına ek yoğun yakalama açma; hasadı ayrı pencereye planla.
+- **Watchdog açığı (yazılım hatası, düzeltilecek):** çıkış kaynağı 'connected=true' görünürken son kare
+  3 saat eskiydi ve restart sayacı 0'dı — ffmpeg asılı kalınca kare-yaşı bekçisi tetiklenmemiş.
+  Düzeltme: IsConnected/health, son-kare yaşına bağlanacak + kare-yaşı eşiğinde zorunlu restart.
+- Kameranın çıkış tarafında tekrar-filtresi kapalı (config'te görüldü) → kameranın kendi çift/çelişkili
+  kayıtları; karşılaştırma metodolojisinde dikkate alınıyor.
+
 ## 6. Ekler
 
 ### 6.1 Metodoloji dersleri (tekrar-üretilebilirlik için)
