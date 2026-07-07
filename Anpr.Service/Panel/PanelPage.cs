@@ -119,10 +119,16 @@ function rematch(f){
   }
 }
 function board(f){
-  const g=f.ours.filter(r=>r.match==="green").length,
-        y=f.ours.filter(r=>r.match==="yellow").length,
-        r=f.cam.filter(x=>x.match==="red").length,
-        b=f.ours.filter(x=>x.match==="blue").length, tot=g+y+r;
+  // Adil sayım penceresi: iki tarafın da kaydı olan ORTAK aralık (servis yeniden başlatma /
+  // kamera tamponu farkları tek taraflı "kaçırdı" sayımı üretmesin diye).
+  const t0=Math.max(
+    f.cam.length ?Math.min(...f.cam.map(x=>x.t)) :0,
+    f.ours.length?Math.min(...f.ours.map(x=>x.t)):0);
+  const cams=f.cam.filter(x=>x.t>=t0), ours=f.ours.filter(x=>x.t>=t0);
+  const g=ours.filter(r=>r.match==="green").length,
+        y=ours.filter(r=>r.match==="yellow").length,
+        r=cams.filter(x=>x.match==="red").length,
+        b=ours.filter(x=>x.match==="blue").length, tot=g+y+r;
   $("cExact").textContent=g; $("cNear").textContent=y;
   $("cCamOnly").textContent=r; $("cOursOnly").textContent=b;
   $("cPct").textContent=tot?Math.round(100*g/tot)+"%":"–";
@@ -168,7 +174,8 @@ function connect(){
 async function backfill(){
   try{
     const ev=await(await fetch("/events/recent?count=100")).json();
-    for(const e of ev.events||[]){
+    // API en-yeni-önce döner; tampon kronolojik tutulur (render sonda ters çevirir) -> eskiden yeniye it.
+    for(const e of (ev.events||[]).slice().reverse()){
       const f=ensure(e.cameraId);
       push(f,"ours",{plate:e.plate,t:Date.parse(e.timestamp),conf:Math.round(e.ocrConfidence*100)/100},
            "ours|"+e.plate+"|"+e.timestamp);
@@ -193,16 +200,25 @@ function syncCanvas(){
   const w=live.clientWidth, h=live.clientHeight;
   if(w&&h&&(cv.width!==w||cv.height!==h)){cv.width=w;cv.height=h;}
 }
-function toCanvas(p){ return [p[0]*cv.width/1000, p[1]*cv.height/1000]; }
+// object-fit:contain letterbox telafisi: video içeriğinin canvas içindeki gerçek dikdörtgeni.
+function contentRect(){
+  const cw=cv.width, ch=cv.height;
+  if(!natW||!natH||!cw||!ch) return {x:0,y:0,w:cw,h:ch};
+  const sc=Math.min(cw/natW, ch/natH);
+  const w=natW*sc, h=natH*sc;
+  return {x:(cw-w)/2, y:(ch-h)/2, w, h};
+}
+function toCanvas(p){ const r=contentRect(); return [r.x+p[0]*r.w/1000, r.y+p[1]*r.h/1000]; }
 let lastBoxes=[];
 function draw(){
   syncCanvas();
   ctx.clearRect(0,0,cv.width,cv.height);
   // MJPEG'de naturalWidth ilk kareden sonra sabit — kutular doğal→görünen ölçeğiyle çizilir.
   natW=live.naturalWidth||natW; natH=live.naturalHeight||natH;
+  const cr=contentRect();
   if(natW) for(const b of lastBoxes||[]){
     ctx.strokeStyle="#e05252"; ctx.lineWidth=2;
-    ctx.strokeRect(b.x*cv.width/natW, b.y*cv.height/natH, b.w*cv.width/natW, b.h*cv.height/natH);
+    ctx.strokeRect(cr.x+b.x*cr.w/natW, cr.y+b.y*cr.h/natH, b.w*cr.w/natW, b.h*cr.h/natH);
   }
   const poly=roiDraft??roi;
   if(poly.length){
@@ -228,8 +244,14 @@ const roiToStr=pts=>pts.map(p=>Math.round(p[0])+","+Math.round(p[1])).join(";");
 
 cv.addEventListener("click",e=>{
   if(!roiDraft)return;
-  const r=cv.getBoundingClientRect();
-  roiDraft.push([(e.clientX-r.left)/r.width*1000,(e.clientY-r.top)/r.height*1000]);
+  const br=cv.getBoundingClientRect();
+  const cx=(e.clientX-br.left)*cv.width/br.width, cy=(e.clientY-br.top)*cv.height/br.height;
+  const cr=contentRect();
+  // yalnız video içeriği üstündeki tıklar sayılır (letterbox dışı yok sayılır)
+  if(cx<cr.x||cy<cr.y||cx>cr.x+cr.w||cy>cr.y+cr.h)return;
+  const nx=Math.max(0,Math.min(1000,(cx-cr.x)/cr.w*1000));
+  const ny=Math.max(0,Math.min(1000,(cy-cr.y)/cr.h*1000));
+  roiDraft.push([nx,ny]);
 });
 cv.addEventListener("dblclick",e=>{ if(roiDraft&&roiDraft.length>=3){e.preventDefault();$("roiSave").disabled=false;} });
 $("roiDraw").onclick=()=>{roiDraft=[];$("roiSave").disabled=true;$("roiCancel").disabled=false;};
