@@ -22,6 +22,8 @@ public sealed class WebhookEventSink : IEventSink
 
     public async Task PublishAsync(PlateEvent e, CancellationToken cancellationToken)
     {
+        // Gözlem (ROI dışı) okumalar otopark yazılımına GÖNDERİLMEZ — bariyer kanalı yalnız "roi".
+        if (e.Scope != "roi") return;
         try
         {
             // Her gönderimde fabrikadan client al (IHttpClientFactory handler rotasyonu/DNS yenilemesi yapsın).

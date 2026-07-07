@@ -64,6 +64,14 @@ public sealed class AnprOptions
     public bool DeskewPlates { get; set; } = false;
 
     /// <summary>
+    /// Gözlem OCR bütçesi: ROI DIŞI tespitlerden kare başına en fazla bu kadarına (en büyükten başlayarak)
+    /// OCR uygulanır ve okumalar InZone=false etiketiyle döner. Kameranın kapsam-dışı (cadde/uzak)
+    /// okumalarıyla panelde eşleşebilmek için; bariyer kararına girmez. 0 = kapalı (eski davranış).
+    /// ROI tanımsızken etkisizdir (her tespit zaten bölge içi sayılır).
+    /// </summary>
+    public int ObservationMaxPerFrame { get; set; } = 0;
+
+    /// <summary>
     /// CPU için ONNX Runtime SessionOptions üretir:
     /// CPU EP (varsayılan), IntraOp=OnnxIntraOpThreads, InterOp=1, sequential, ORT_ENABLE_ALL.
     /// Hiçbir yerde CUDA/GPU sağlayıcısı eklenmez.

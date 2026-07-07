@@ -104,9 +104,12 @@ app.MapGet("/health", (AnprCameraSupervisor sup) =>
     });
 });
 
-app.MapGet("/events/recent", (InMemoryEventStore store, int? count) =>
+app.MapGet("/events/recent", (InMemoryEventStore store, int? count, string? scope) =>
 {
+    // scope=roi -> yalnız tetik-bölgesi olayları (otopark yazılımı için); varsayılan: hepsi (panel/ölçüm).
     var events = store.GetRecent(count ?? 50);
+    if (!string.IsNullOrEmpty(scope))
+        events = events.Where(e => e.Scope == scope).ToList();
     return Results.Json(new { total = store.TotalCount, returned = events.Count, events });
 });
 

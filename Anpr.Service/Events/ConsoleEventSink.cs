@@ -12,8 +12,8 @@ public sealed class ConsoleEventSink : IEventSink
     public Task PublishAsync(PlateEvent e, CancellationToken cancellationToken)
     {
         _logger.LogInformation(
-            "PLAKA {Plate} | {CameraName} ({CameraId}) | güven={Confidence:P0} (det={Det:P0} ocr={Ocr:P0}) | ham='{Raw}' | {Timestamp:HH:mm:ss}",
-            e.Plate, e.CameraName, e.CameraId, e.Confidence, e.DetectorConfidence, e.OcrConfidence, e.RawText, e.Timestamp);
+            "PLAKA{Obs} {Plate} | {CameraName} ({CameraId}) | güven={Confidence:P0} (det={Det:P0} ocr={Ocr:P0}) | ham='{Raw}' | {Timestamp:HH:mm:ss}",
+            e.Scope == "roi" ? "" : "(gözlem)", e.Plate, e.CameraName, e.CameraId, e.Confidence, e.DetectorConfidence, e.OcrConfidence, e.RawText, e.Timestamp);
         return Task.CompletedTask;
     }
 }

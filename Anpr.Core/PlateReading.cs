@@ -41,6 +41,12 @@ public sealed record PlateReading
     /// <summary>OCR alfabesi (SlotProbs'taki vocab sırası). SlotProbs doluysa dolu olur.</summary>
     public string? OcrAlphabet { get; init; }
 
+    /// <summary>
+    /// Tespit merkezi ROI içinde mi? ROI tanımsızsa daima true. false = "gözlem" okuması:
+    /// kapsam dışı (cadde/uzak) trafik — bariyer kararına girmez, karşılaştırma/izleme için yayınlanır.
+    /// </summary>
+    public bool InZone { get; init; } = true;
+
     public override string ToString() =>
         $"{Text} (conf={Confidence:F2}, det={DetectorConfidence:F2}, ocr={OcrConfidence:F2}, tr={IsValidTr})";
 }

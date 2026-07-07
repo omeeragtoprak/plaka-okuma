@@ -24,4 +24,10 @@ public sealed record PlateEvent
     public required float DetectorConfidence { get; init; }
     public required float OcrConfidence { get; init; }
     public required PlateBox Box { get; init; }
+
+    /// <summary>
+    /// Olay kapsamı: "roi" = tetik bölgesi içi (bariyer/otopark yazılımına gider);
+    /// "gozlem" = ROI dışı cadde/uzak okuma (yalnız izleme/karşılaştırma — karar üretmez).
+    /// </summary>
+    public string Scope { get; init; } = "roi";
 }

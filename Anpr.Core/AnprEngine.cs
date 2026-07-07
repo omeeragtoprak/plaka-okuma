@@ -78,38 +78,9 @@ public sealed class AnprEngine : IDisposable
     /// <summary>Bir görüntüden plaka okur.</summary>
     public IReadOnlyList<PlateReading> Recognize(SKBitmap image)
     {
-        ArgumentNullException.ThrowIfNull(image);
-
-        var detections = _detector.Detect(image);
-        var readings = new List<PlateReading>(detections.Count);
-
-        int minPlateW = (int)(image.Width * _options.MinPlateWidthRatio);
-        foreach (var det in detections)
-        {
-            // OCR'ı yalnızca MinConfidence üstündeki tespitlere uygula (CPU tasarrufu).
-            if (det.Confidence < _options.MinConfidence) continue;
-            // Tetik bölgesi: çok küçük/uzak plakalara OCR yapma.
-            if (det.Width < minPlateW) continue;
-            // ROI: kapsam dışı tespitlere OCR yapma (kapsam hizalama + CPU tasarrufu).
-            if (!InRoi(det, image.Width, image.Height)) continue;
-
-            var rect = ExpandAndClamp(det, image.Width, image.Height, _options.CropPaddingRatio);
-            if (rect.Width < 2 || rect.Height < 2) continue;
-
-            using var crop = SkiaImaging.ExtractSubset(image, rect);
-            SkiaSharp.SKBitmap? deskewed = null;
-            if (_options.DeskewPlates)
-            {
-                deskewed = PlateRectifier.Deskew(crop);
-                if (ReferenceEquals(deskewed, crop)) deskewed = null; // değişmediyse kopya yok
-            }
-            var ocr = _recognizer.Recognize(deskewed ?? crop);
-            deskewed?.Dispose();
-
-            var reading = BuildReading(ocr, new PlateBox(rect.Left, rect.Top, rect.Width, rect.Height), det.Confidence);
-            if (reading != null) readings.Add(reading);
-        }
-
+        var results = RecognizeCore(image, wantCrops: false);
+        var readings = new List<PlateReading>(results.Count);
+        foreach (var (r, _) in results) readings.Add(r);
         readings.Sort((a, b) => b.Confidence.CompareTo(a.Confidence));
         return readings;
     }
@@ -120,22 +91,71 @@ public sealed class AnprEngine : IDisposable
     {
         ArgumentNullException.ThrowIfNull(imageBytes);
         using var image = SkiaImaging.DecodeRgba(imageBytes);
+        return RecognizeCore(image, wantCrops: true);
+    }
+
+    /// <summary>Recognize gibi ama SKBitmap'ten, kırpıntılarla (canlı füzyon hattı için).</summary>
+    public IReadOnlyList<(PlateReading Reading, SKBitmap Crop)> RecognizeWithCrops(SKBitmap image)
+        => RecognizeCore(image, wantCrops: true);
+
+    // Ortak boru hattı: tespit -> (bölge içi hepsi + bölge dışı en büyük N "gözlem") -> kırp -> OCR.
+    private List<(PlateReading Reading, SKBitmap Crop)> RecognizeCore(SKBitmap image, bool wantCrops)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+
         var detections = _detector.Detect(image);
-        var results = new List<(PlateReading, SKBitmap)>();
+        var results = new List<(PlateReading, SKBitmap)>(detections.Count);
+
         int minPlateW = (int)(image.Width * _options.MinPlateWidthRatio);
+        List<PlateDetection>? outOfZone = null;
+
         foreach (var det in detections)
         {
+            // OCR'ı yalnızca MinConfidence üstündeki tespitlere uygula (CPU tasarrufu).
             if (det.Confidence < _options.MinConfidence) continue;
+            // Tetik bölgesi: çok küçük/uzak plakalara OCR yapma.
             if (det.Width < minPlateW) continue;
-            if (!InRoi(det, image.Width, image.Height)) continue;
-            var rect = ExpandAndClamp(det, image.Width, image.Height, _options.CropPaddingRatio);
-            if (rect.Width < 2 || rect.Height < 2) continue;
-            using var crop = SkiaImaging.ExtractSubset(image, rect);
-            var ocr = _recognizer.Recognize(crop);
-            var reading = BuildReading(ocr, new PlateBox(rect.Left, rect.Top, rect.Width, rect.Height), det.Confidence);
-            if (reading != null) results.Add((reading, crop.Copy()));
+
+            if (!InRoi(det, image.Width, image.Height))
+            {
+                // ROI dışı: gözlem bütçesi varsa aday listesine al (aşağıda en büyükler okunur).
+                if (_options.ObservationMaxPerFrame > 0) (outOfZone ??= new()).Add(det);
+                continue;
+            }
+
+            RecognizeOne(image, det, inZone: true, wantCrops, results);
         }
+
+        if (outOfZone != null)
+        {
+            // Kare başına en fazla N gözlem OCR'ı; en büyük (en okunabilir) plakalar önce.
+            outOfZone.Sort((a, b) => b.Width.CompareTo(a.Width));
+            int n = Math.Min(_options.ObservationMaxPerFrame, outOfZone.Count);
+            for (int i = 0; i < n; i++)
+                RecognizeOne(image, outOfZone[i], inZone: false, wantCrops, results);
+        }
+
         return results;
+    }
+
+    private void RecognizeOne(SKBitmap image, PlateDetection det, bool inZone, bool wantCrops,
+        List<(PlateReading, SKBitmap)> results)
+    {
+        var rect = ExpandAndClamp(det, image.Width, image.Height, _options.CropPaddingRatio);
+        if (rect.Width < 2 || rect.Height < 2) return;
+
+        using var crop = SkiaImaging.ExtractSubset(image, rect);
+        SKBitmap? deskewed = null;
+        if (_options.DeskewPlates)
+        {
+            deskewed = PlateRectifier.Deskew(crop);
+            if (ReferenceEquals(deskewed, crop)) deskewed = null; // değişmediyse kopya yok
+        }
+        var ocr = _recognizer.Recognize(deskewed ?? crop);
+        deskewed?.Dispose();
+
+        var reading = BuildReading(ocr, new PlateBox(rect.Left, rect.Top, rect.Width, rect.Height), det.Confidence, inZone);
+        if (reading != null) results.Add((reading, wantCrops ? crop.Copy() : null!));
     }
 
     /// <summary>Birkaç kırpıntıyı füzyonla birleştirip füzyon görüntüsünde OCR çalıştırır → tek okuma.</summary>
@@ -147,7 +167,7 @@ public sealed class AnprEngine : IDisposable
         return BuildReading(ocr, default, 1.0f);
     }
 
-    private PlateReading? BuildReading(Recognition.PlateOcrResult ocr, PlateBox box, float detConf)
+    private PlateReading? BuildReading(Recognition.PlateOcrResult ocr, PlateBox box, float detConf, bool inZone = true)
     {
         if (string.IsNullOrWhiteSpace(ocr.Text)) return null;
 
@@ -171,6 +191,7 @@ public sealed class AnprEngine : IDisposable
             IsValidTr = validTr,
             SlotProbs = ocr.SlotProbs,
             OcrAlphabet = ocr.Alphabet,
+            InZone = inZone,
         };
     }
 

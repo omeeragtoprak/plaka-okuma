@@ -115,6 +115,26 @@ public sealed class AnprServiceOptions
     /// <summary>OCR öncesi plaka deskew (eğiklik düzeltme). Açılı veride ÖLÇÜLMELİ. Varsayılan kapalı.</summary>
     public bool DeskewPlates { get; set; } = false;
 
+    /// <summary>
+    /// Gözlem OCR bütçesi: ROI DIŞI tespitlerden kare başına en fazla bu kadarı (en büyükten) okunur ve
+    /// Scope="gozlem" olayı olarak yayınlanır (bariyer kararına girmez; panelde kamerayla eşleşir).
+    /// 0 = kapalı. ROI tanımsız kamerada etkisizdir.
+    /// </summary>
+    public int ObservationMaxPerFrame { get; set; } = 2;
+
+    /// <summary>
+    /// Çok-kareli füzyon: düşük güvenli uzlaşı emitlerinde, izin en iyi kırpıntıları hizalanıp
+    /// ortalanır ve füzyon görüntüsünde OCR bir kez daha çalışır; daha güvenli sonuç kazanır.
+    /// Bulanık/düşük çözünürlüklü plakalar için. Araç başına en fazla 1 ekstra OCR. Ölçümle açılır.
+    /// </summary>
+    public bool MultiFrameFusion { get; set; } = false;
+
+    /// <summary>Füzyonda kullanılacak en iyi kırpıntı sayısı (iz başına saklanan üst sınır).</summary>
+    public int FusionMaxFrames { get; set; } = 5;
+
+    /// <summary>Uzlaşı OCR güveni bu eşiğin ALTINDAysa füzyon denenir (yüksek güvenli emitlere dokunulmaz).</summary>
+    public float FusionTriggerOcr { get; set; } = 0.85f;
+
     public int HttpPort { get; set; } = 8080;
 
     /// <summary>HTTP dinleme adresi. 0.0.0.0 = tüm arayüzler (LAN'daki web app erişebilsin).</summary>

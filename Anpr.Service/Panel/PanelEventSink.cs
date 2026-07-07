@@ -14,6 +14,7 @@ public sealed class PanelEventSink : IEventSink
         _hub.Publish(new
         {
             source = "ours",
+            scope = e.Scope,
             cameraId = e.CameraId,
             plate = e.Plate,
             compact = e.PlateCompact,

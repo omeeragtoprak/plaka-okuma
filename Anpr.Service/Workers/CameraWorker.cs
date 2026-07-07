@@ -4,6 +4,7 @@ using Anpr.Service.Configuration;
 using Anpr.Service.Events;
 using Anpr.Service.Frames;
 using Microsoft.Extensions.Logging;
+using SkiaSharp;
 
 namespace Anpr.Service.Workers;
 
@@ -21,7 +22,18 @@ public sealed class CameraWorker : IAsyncDisposable
     private readonly IReadOnlyList<IEventSink> _sinks;
     private readonly ILogger _logger;
     private readonly PlateConfirmer _confirmer;
+    private readonly PlateConfirmer _obsConfirmer; // ROI dışı "gözlem" okumaları (bariyer kararına girmez)
     private readonly List<Task> _pendingPublishes = new();
+
+    // Çok-kareli füzyon: iz başına en iyi kırpıntılar (yalnız bölge-içi; düşük güvenli emitte füzyon denenir).
+    private sealed class CropBucket
+    {
+        public readonly HashSet<string> Variants = new();
+        public readonly List<(SKBitmap Bmp, float Conf)> Crops = new();
+        public DateTimeOffset Last;
+        public void DisposeAll() { foreach (var (b, _) in Crops) b.Dispose(); Crops.Clear(); }
+    }
+    private readonly List<CropBucket> _cropBuckets = new();
 
     private CancellationToken _ct;
     private Task? _loopTask;
@@ -61,7 +73,7 @@ public sealed class CameraWorker : IAsyncDisposable
         _engine = engine;
         _sinks = sinks;
         _logger = logger;
-        _confirmer = new PlateConfirmer(new PlateConfirmerOptions
+        PlateConfirmerOptions MakeOpts() => new()
         {
             DedupWindow = TimeSpan.FromSeconds(Math.Max(1, options.DedupWindowSeconds)),
             SettleWindow = TimeSpan.FromSeconds(Math.Max(0, options.SettleWindowSeconds)),
@@ -71,7 +83,9 @@ public sealed class CameraWorker : IAsyncDisposable
             MergeAcrossProvince = options.MergeAcrossProvince,
             FuzzyMergeDistance = options.FuzzyMergeDistance,
             EarlyEmitMinOcr = options.EarlyEmitMinOcr,
-        });
+        };
+        _confirmer = new PlateConfirmer(MakeOpts());
+        _obsConfirmer = new PlateConfirmer(MakeOpts());
     }
 
     public void Start(CancellationToken cancellationToken)
@@ -106,9 +120,12 @@ public sealed class CameraWorker : IAsyncDisposable
             }
 
             foreach (var best in _confirmer.DrainReady(now))
-                Emit(best, now);
+                Emit(best, now, scope: "roi");
+            foreach (var best in _obsConfirmer.DrainReady(now))
+                Emit(best, now, scope: "gozlem");
 
             ReapPublishes();
+            CleanCropBuckets(now);
 
             // Uyarlanabilir hız: araç varken aktif, yoksa boşta fps.
             double fps = now < activeUntil ? activeFps : idleFps;
@@ -117,26 +134,156 @@ public sealed class CameraWorker : IAsyncDisposable
         }
     }
 
-    // Tespit olup olmadığını döner (aktif moda geçiş için).
+    // Bölge-içi tespit olup olmadığını döner (aktif moda geçiş için — ROI dışı cadde trafiği
+    // aktif fps'i tetiklememeli, yoksa zayıf CPU bütün gün yüksek hızda döner).
     private bool ObserveFrame(byte[] frame, DateTimeOffset now)
     {
         FramesProcessed++;
-        var readings = _engine.Recognize(frame);
+
+        IReadOnlyList<PlateReading> readings;
+        if (_options.MultiFrameFusion)
+        {
+            var withCrops = _engine.RecognizeWithCrops(frame);
+            var list = new List<PlateReading>(withCrops.Count);
+            foreach (var (r, crop) in withCrops)
+            {
+                list.Add(r);
+                // Füzyon için yalnız bölge-içi geçerli okumaların kırpıntıları saklanır (sahiplenilir).
+                if (r.InZone && r.IsValidTr && crop != null) StoreCrop(r, crop, now);
+                else crop?.Dispose();
+            }
+            readings = list;
+        }
+        else
+        {
+            readings = _engine.Recognize(frame);
+        }
+
         _lastFrameJpeg = frame;
         _lastBoxes = readings.Select(r => r.Box).ToArray();
 
+        bool zoneDetection = false;
         foreach (var r in readings)
         {
+            if (r.InZone) zoneDetection = true;
             if (!r.IsValidTr) continue;                          // çöp/geçersiz okumaları gönderme
             if (r.Confidence < _options.EmitMinConfidence) continue;
             if (r.OcrConfidence < _options.EmitMinOcrConfidence) continue; // belirsiz/kötü okuma -> ele
-            _confirmer.Observe(r, now);
+            (r.InZone ? _confirmer : _obsConfirmer).Observe(r, now);
         }
-        return readings.Count > 0; // herhangi bir plaka tespiti = araç var
+        return zoneDetection;
     }
 
-    private void Emit(PlateReading best, DateTimeOffset now)
+    // ---- Çok-kareli füzyon yardımcıları ----
+
+    private void StoreCrop(PlateReading r, SKBitmap crop, DateTimeOffset now)
     {
+        string compact = Compact(r.Text);
+        var bucket = FindBucket(compact);
+        if (bucket == null)
+        {
+            bucket = new CropBucket();
+            _cropBuckets.Add(bucket);
+        }
+        bucket.Variants.Add(compact);
+        bucket.Last = now;
+
+        bucket.Crops.Add((crop, r.OcrConfidence));
+        if (bucket.Crops.Count > Math.Max(2, _options.FusionMaxFrames))
+        {
+            // En düşük güvenliyi at (füzyona en iyi kareler girsin).
+            int worst = 0;
+            for (int i = 1; i < bucket.Crops.Count; i++)
+                if (bucket.Crops[i].Conf < bucket.Crops[worst].Conf) worst = i;
+            bucket.Crops[worst].Bmp.Dispose();
+            bucket.Crops.RemoveAt(worst);
+        }
+    }
+
+    private CropBucket? FindBucket(string compact)
+    {
+        foreach (var b in _cropBuckets)
+            foreach (var v in b.Variants)
+                if (Levenshtein(compact, v) <= Math.Max(1, _options.FuzzyMergeDistance)) return b;
+        return null;
+    }
+
+    // Düşük güvenli uzlaşı emitinde füzyon dener; daha güvenli GEÇERLİ sonuç çıkarsa onu döner.
+    private PlateReading? TryFuse(PlateReading best)
+    {
+        var bucket = FindBucket(Compact(best.Text));
+        if (bucket == null || bucket.Crops.Count < 2) return null;
+
+        try
+        {
+            var fused = _engine.RecognizeFused(bucket.Crops.Select(c => c.Bmp).ToList());
+            if (fused == null || !fused.IsValidTr) return null;
+            if (fused.OcrConfidence <= best.OcrConfidence) return null;
+
+            _logger.LogInformation("[{Cam}] füzyon: '{Old}' (ocr={OldC:P0}) -> '{New}' (ocr={NewC:P0}, {N} kare)",
+                _camera.Id, best.Text, best.OcrConfidence, fused.Text, fused.OcrConfidence, bucket.Crops.Count);
+
+            return best with
+            {
+                Text = fused.Text,
+                RawText = fused.RawText,
+                OcrConfidence = fused.OcrConfidence,
+                Confidence = best.DetectorConfidence * fused.OcrConfidence,
+                IsValidTr = true,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[{Cam}] füzyon hatası: {Msg}", _camera.Id, ex.Message);
+            return null;
+        }
+        finally
+        {
+            bucket.DisposeAll();
+            _cropBuckets.Remove(bucket);
+        }
+    }
+
+    private void CleanCropBuckets(DateTimeOffset now)
+    {
+        if (_cropBuckets.Count == 0) return;
+        var ttl = TimeSpan.FromSeconds(Math.Max(1, _options.DedupWindowSeconds));
+        for (int i = _cropBuckets.Count - 1; i >= 0; i--)
+        {
+            if (now - _cropBuckets[i].Last > ttl)
+            {
+                _cropBuckets[i].DisposeAll();
+                _cropBuckets.RemoveAt(i);
+            }
+        }
+    }
+
+    private static int Levenshtein(string a, string b)
+    {
+        if (a == b) return 0;
+        if (a.Length == 0) return b.Length;
+        if (b.Length == 0) return a.Length;
+        var dp = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) dp[j] = j;
+        for (int i = 1; i <= a.Length; i++)
+        {
+            int prev = dp[0]; dp[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cur = dp[j];
+                dp[j] = Math.Min(Math.Min(dp[j] + 1, dp[j - 1] + 1), prev + (a[i - 1] == b[j - 1] ? 0 : 1));
+                prev = cur;
+            }
+        }
+        return dp[b.Length];
+    }
+
+    private void Emit(PlateReading best, DateTimeOffset now, string scope)
+    {
+        // Bulanık/düşük güvenli uzlaşı: çok-kareli füzyonla ikinci şans (yalnız bölge-içi, araç başına 1 kez).
+        if (scope == "roi" && _options.MultiFrameFusion && best.OcrConfidence < _options.FusionTriggerOcr)
+            best = TryFuse(best) ?? best;
+
         string compact = Compact(best.Text);
         if (compact.Length == 0) return;
 
@@ -157,11 +304,11 @@ public sealed class CameraWorker : IAsyncDisposable
             DetectorConfidence = best.DetectorConfidence,
             OcrConfidence = best.OcrConfidence,
             Box = best.Box,
+            Scope = scope,
         };
 
         EventsEmitted++;
-        LastEventUtc = now;
-        LastPlate = best.Text;
+        if (scope == "roi") { LastEventUtc = now; LastPlate = best.Text; } // sağlıkta bariyer-kapsamı görünsün
 
         _pendingPublishes.Add(PublishAsync(evt, _ct));
     }
@@ -199,6 +346,9 @@ public sealed class CameraWorker : IAsyncDisposable
 
         // Bekleyen yayınları en fazla 5 sn boşalt (kapanışta son olayları kaybetme).
         try { await Task.WhenAll(_pendingPublishes).WaitAsync(TimeSpan.FromSeconds(5)); } catch { /* yoksay */ }
+
+        foreach (var b in _cropBuckets) b.DisposeAll();
+        _cropBuckets.Clear();
 
         await _frameSource.DisposeAsync();
         _engine.Dispose();
