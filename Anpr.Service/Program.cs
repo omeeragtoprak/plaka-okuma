@@ -60,7 +60,8 @@ if (!string.IsNullOrWhiteSpace(opts.WebhookUrl))
 builder.Services.AddSingleton<PanelHub>();
 builder.Services.AddSingleton<RoiStore>();
 builder.Services.AddSingleton<IEventSink, PanelEventSink>();
-builder.Services.AddHostedService<CameraRecordPoller>();
+builder.Services.AddSingleton<CameraRecordPoller>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CameraRecordPoller>());
 
 // --- Kamera yöneticisi (hem singleton hem hosted service) ---
 builder.Services.AddSingleton<AnprCameraSupervisor>();
@@ -133,7 +134,7 @@ app.MapGet("/api/stream", async (HttpContext ctx, PanelHub hub) =>
 app.MapGet("/api/snapshot/{cameraId}", (string cameraId, AnprCameraSupervisor sup) =>
 {
     var w = sup.Workers.FirstOrDefault(w => w.CameraId == cameraId);
-    var jpeg = w?.LastFrameJpeg;
+    var jpeg = w?.PeekSourceFrame() ?? w?.LastFrameJpeg;
     return jpeg == null ? Results.StatusCode(503) : Results.Bytes(jpeg, "image/jpeg");
 });
 
@@ -168,5 +169,35 @@ app.MapPut("/api/roi/{cameraId}", async (string cameraId, HttpRequest req, AnprC
     w?.ApplyRoi(roi);
     return Results.Json(new { ok = true, cameraId, roi, applied = w != null });
 });
+
+// Canlı MJPEG akışı (kaynak hızında, ~15 fps üst sınır; istemci koptuğunda döngü biter).
+app.MapGet("/api/mjpeg/{cameraId}", async (string cameraId, AnprCameraSupervisor sup, HttpContext ctx) =>
+{
+    var w = sup.Workers.FirstOrDefault(w => w.CameraId == cameraId);
+    if (w == null) { ctx.Response.StatusCode = 404; return; }
+    ctx.Response.ContentType = "multipart/x-mixed-replace; boundary=frame";
+    byte[]? last = null;
+    try
+    {
+        while (!ctx.RequestAborted.IsCancellationRequested)
+        {
+            var f = w.PeekSourceFrame();
+            if (f != null && !ReferenceEquals(f, last))
+            {
+                last = f;
+                await ctx.Response.WriteAsync($"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {f.Length}\r\n\r\n", ctx.RequestAborted);
+                await ctx.Response.Body.WriteAsync(f, ctx.RequestAborted);
+                await ctx.Response.WriteAsync("\r\n", ctx.RequestAborted);
+                await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+            }
+            await Task.Delay(66, ctx.RequestAborted);
+        }
+    }
+    catch (OperationCanceledException) { /* istemci ayrıldı */ }
+});
+
+// Sayfa-açılış dolumu: kameranın son kayıtları (poller tamponundan).
+app.MapGet("/api/camera/recent", (string cameraId, CameraRecordPoller poller) =>
+    Results.Json(new { cameraId, records = poller.Recent(cameraId) }));
 
 app.Run();

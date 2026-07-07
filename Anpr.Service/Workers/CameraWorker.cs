@@ -39,6 +39,8 @@ public sealed class CameraWorker : IAsyncDisposable
     private volatile byte[]? _lastFrameJpeg;
     private volatile IReadOnlyList<PlateBox>? _lastBoxes;
     public byte[]? LastFrameJpeg => _lastFrameJpeg;
+    /// <summary>Kaynağın EN SON karesi (ffmpeg varış hızında; işleme hızından bağımsız) — canlı MJPEG için.</summary>
+    public byte[]? PeekSourceFrame() => _frameSource.TryGetLatestFrame();
     public IReadOnlyList<PlateBox> LastBoxes => _lastBoxes ?? Array.Empty<PlateBox>();
     public string CurrentRoi => _engine.RoiSpec;
     public void ApplyRoi(string? spec) => _engine.SetRoi(spec);

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -20,6 +21,20 @@ public sealed partial class CameraRecordPoller : BackgroundService
     private readonly AnprServiceOptions _options;
     private readonly PanelHub _hub;
     private readonly ILogger<CameraRecordPoller> _logger;
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<CamEvent>> _recent = new();
+
+    public sealed record CamEvent(string CameraId, string Plate, string TimeIso);
+
+    /// <summary>Panelin sayfa-açılış dolumu için son kayıtlar (en yeni sonda).</summary>
+    public IReadOnlyList<CamEvent> Recent(string cameraId)
+        => _recent.TryGetValue(cameraId, out var q) ? q.ToArray() : Array.Empty<CamEvent>();
+
+    private void Remember(CamEvent e)
+    {
+        var q = _recent.GetOrAdd(e.CameraId, _ => new ConcurrentQueue<CamEvent>());
+        q.Enqueue(e);
+        while (q.Count > 100 && q.TryDequeue(out _)) { }
+    }
 
     public CameraRecordPoller(IOptions<AnprServiceOptions> options, PanelHub hub, ILogger<CameraRecordPoller> logger)
     {
@@ -38,8 +53,9 @@ public sealed partial class CameraRecordPoller : BackgroundService
         {
             foreach (var st in states)
             {
-                // Panel istemcisi yokken kamerayı yine de yoklamak zararsız ama gereksiz — abone varsa çalış.
-                if (_hub.SubscriberCount == 0) continue;
+                // İlk tur HER ZAMAN çalışır (saat farkı + sayfa-dolumu tamponu tohumlanır);
+                // sonrasında panel istemcisi yokken kamerayı yoklamak gereksiz — abone varsa çalış.
+                if (_hub.SubscriberCount == 0 && !st.FirstPoll) continue;
                 try { await PollOnce(st, ct); st.Ok = true; }
                 catch (Exception ex)
                 {
@@ -74,16 +90,11 @@ public sealed partial class CameraRecordPoller : BackgroundService
             st.SeenOrder.Enqueue(key);
             while (st.SeenOrder.Count > 1000 && st.SeenOrder.TryDequeue(out var old)) st.Seen.Remove(old);
 
-            if (st.FirstPoll) continue; // tarihi sessizce yut
             var localTime = rec.CaptureTime - st.ClockOffset;
-            _hub.Publish(new
-            {
-                source = "camera",
-                cameraId = st.Cam.Id,
-                plate = rec.Plate,
-                compact = rec.Plate,
-                timeIso = localTime.ToString("o"),
-            });
+            var ce = new CamEvent(st.Cam.Id, rec.Plate, localTime.ToString("o"));
+            Remember(ce); // sayfa-dolumu tamponu (ilk turdaki tarih dahil)
+            if (st.FirstPoll) continue; // tarihi CANLI akışa basma
+            _hub.Publish(new { source = "camera", cameraId = ce.CameraId, plate = ce.Plate, compact = ce.Plate, timeIso = ce.TimeIso });
         }
         st.FirstPoll = false;
     }

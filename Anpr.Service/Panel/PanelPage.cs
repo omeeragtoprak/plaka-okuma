@@ -1,6 +1,7 @@
 namespace Anpr.Service.Panel;
 
-/// <summary>Canlı karşılaştırma paneli — tek gömülü HTML (CDN'siz; internetsiz hedef PC'de çalışır).</summary>
+/// <summary>Canlı karşılaştırma paneli — tek gömülü HTML (CDN'siz; internetsiz hedef PC'de çalışır).
+/// Önizleme: gerçek MJPEG akışı (kaynak hızında) + üstünde saydam overlay (tespit kutuları + ROI).</summary>
 public static class PanelPage
 {
     public const string Html = """
@@ -29,7 +30,9 @@ public static class PanelPage
   main { padding:12px 14px; display:grid; gap:12px; }
   .preview { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; }
   .preview .bar { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
-  .preview canvas { width:100%; max-height:56vh; border-radius:6px; background:#000; display:block; cursor:crosshair; }
+  .stage { position:relative; border-radius:6px; overflow:hidden; background:#000; }
+  .stage img { width:100%; max-height:58vh; display:block; object-fit:contain; }
+  .stage canvas { position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; }
   button.act { background:#24425f; color:var(--tx); border:1px solid #3a6ea5; border-radius:6px; padding:5px 12px; cursor:pointer; }
   button.act[disabled] { opacity:.45; cursor:default; }
   button.warn { background:#5f2424; border-color:#a53a3a; }
@@ -46,6 +49,7 @@ public static class PanelPage
   .m-green { border-left-color:var(--green); } .m-yellow { border-left-color:var(--yellow); }
   .m-red { border-left-color:var(--red); } .m-blue { border-left-color:var(--blue); }
   .hint { color:var(--dim); font-size:12px; }
+  #roiBadge { font-size:12px; }
 </style>
 </head>
 <body>
@@ -68,10 +72,13 @@ public static class PanelPage
       <button class="act" id="roiSave" disabled>💾 Kaydet</button>
       <button class="act" id="roiCancel" disabled>İptal</button>
       <button class="act warn" id="roiClear">ROI Temizle</button>
-      <span class="hint" id="roiHint">Sarı çokgen = BİZİM yazılımın okuma alanı (kameranın ayarına dokunmaz).
-        Çiz: tıkla-tıkla nokta, çift-tık ile kapat.</span>
+      <span class="chip" id="roiBadge">ROI: —</span>
+      <span class="hint">Sarı çokgen = BİZİM okuma alanı (kameraya yazılmaz; kalıcıdır). Çiz: tıkla-tıkla, çift-tık kapat.</span>
     </div>
-    <canvas id="cv" width="1344" height="760"></canvas>
+    <div class="stage">
+      <img id="live" alt="canlı">
+      <canvas id="cv"></canvas>
+    </div>
   </section>
   <section class="cols">
     <div class="col"><h2>📷 Hikvision (kamera ANPR) <span class="hint" id="camCount"></span></h2><div class="rows" id="camRows"></div></div>
@@ -81,10 +88,11 @@ public static class PanelPage
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-let cams=[], cam=null;                 // kamera listesi + seçili
-const feed={};                          // cameraId -> {cam:[], ours:[]}
-let roi=[], roiDraft=null;             // kayıtlı ROI noktaları (0-1000), çizim taslağı
-let natW=0, natH=0, img=new Image();
+let cams=[], cam=null;
+const feed={};
+let roi=[], roiDraft=null;
+let natW=0, natH=0;
+const live=$("live"), cv=$("cv"), ctx=cv.getContext("2d");
 
 function lev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m)return n;if(!n)return m;
  let dp=Array.from({length:n+1},(_,j)=>j);
@@ -92,10 +100,10 @@ function lev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m)return n;i
   for(let j=1;j<=n;j++){const cur=dp[j];dp[j]=Math.min(dp[j]+1,dp[j-1]+1,prev+(a[i-1]===b[j-1]?0:1));prev=cur;}}
  return dp[n];}
 const compact=s=>(s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+function ensure(id){ if(!feed[id]) feed[id]={cam:[],ours:[],keys:new Set()}; return feed[id]; }
+function push(f,side,rec,key){ if(f.keys.has(key))return; f.keys.add(key);
+  f[side].push(rec); if(f[side].length>200)f[side].shift(); }
 
-function ensure(id){ if(!feed[id]) feed[id]={cam:[],ours:[]}; return feed[id]; }
-
-// Eşleştirme: aynı kamera, ±30 sn; compact eşit → green, lev=1 → yellow; eşleşmeyen → red/blue.
 function rematch(f){
   f.cam.forEach(r=>{r.match="red";r.pair=null;});
   f.ours.forEach(r=>{r.match="blue";r.pair=null;});
@@ -114,8 +122,7 @@ function board(f){
   const g=f.ours.filter(r=>r.match==="green").length,
         y=f.ours.filter(r=>r.match==="yellow").length,
         r=f.cam.filter(x=>x.match==="red").length,
-        b=f.ours.filter(x=>x.match==="blue").length,
-        tot=g+y+r;
+        b=f.ours.filter(x=>x.match==="blue").length, tot=g+y+r;
   $("cExact").textContent=g; $("cNear").textContent=y;
   $("cCamOnly").textContent=r; $("cOursOnly").textContent=b;
   $("cPct").textContent=tot?Math.round(100*g/tot)+"%":"–";
@@ -132,14 +139,13 @@ function render(){
   if(!cam)return;
   const f=ensure(cam);
   rematch(f); board(f);
-  const cr=$("camRows"), or=$("ourRows");
-  cr.replaceChildren(...f.cam.slice(-50).reverse().map(r=>row(r,"cam")));
-  or.replaceChildren(...f.ours.slice(-50).reverse().map(r=>row(r,"ours")));
+  $("camRows").replaceChildren(...f.cam.slice(-60).reverse().map(r=>row(r,"cam")));
+  $("ourRows").replaceChildren(...f.ours.slice(-60).reverse().map(r=>row(r,"ours")));
   $("camCount").textContent=f.cam.length+" kayıt";
   $("ourCount").textContent=f.ours.length+" kayıt";
 }
 
-// ---- SSE (otomatik yeniden bağlanır) ----
+// ---- SSE ----
 let es=null, retry=1000;
 function connect(){
   es=new EventSource("/api/stream");
@@ -153,26 +159,51 @@ function connect(){
       return; }
     const f=ensure(m.cameraId);
     const rec={plate:m.plate,t:Date.parse(m.timeIso),conf:m.conf};
-    (m.source==="camera"?f.cam:f.ours).push(rec);
-    if(f.cam.length>200)f.cam.shift(); if(f.ours.length>200)f.ours.shift();
+    push(f, m.source==="camera"?"cam":"ours", rec, m.source+"|"+m.plate+"|"+m.timeIso);
     if(m.cameraId===cam)render();
   };
 }
 
-// ---- Önizleme + ROI ----
-const cv=$("cv"), ctx=cv.getContext("2d");
+// ---- Sayfa-açılış dolumu (yenilemede tablo boş kalmasın) ----
+async function backfill(){
+  try{
+    const ev=await(await fetch("/events/recent?count=100")).json();
+    for(const e of ev.events||[]){
+      const f=ensure(e.cameraId);
+      push(f,"ours",{plate:e.plate,t:Date.parse(e.timestamp),conf:Math.round(e.ocrConfidence*100)/100},
+           "ours|"+e.plate+"|"+e.timestamp);
+    }
+  }catch{}
+  for(const c of cams){
+    try{
+      const d=await(await fetch(`/api/camera/recent?cameraId=${c.id}`)).json();
+      const f=ensure(c.id);
+      for(const r of d.records||[])
+        push(f,"cam",{plate:r.plate,t:Date.parse(r.timeIso)},"camera|"+r.plate+"|"+r.timeIso);
+    }catch{}
+  }
+}
+
+// ---- Canlı video (MJPEG) + overlay ----
+function setStream(){
+  live.src=`/api/mjpeg/${cam}?t=${Date.now()}`;
+}
+live.addEventListener("load",()=>{ natW=live.naturalWidth; natH=live.naturalHeight; });
+function syncCanvas(){
+  const w=live.clientWidth, h=live.clientHeight;
+  if(w&&h&&(cv.width!==w||cv.height!==h)){cv.width=w;cv.height=h;}
+}
 function toCanvas(p){ return [p[0]*cv.width/1000, p[1]*cv.height/1000]; }
-function draw(boxes){
+let lastBoxes=[];
+function draw(){
+  syncCanvas();
   ctx.clearRect(0,0,cv.width,cv.height);
-  if(img.complete&&natW){ ctx.drawImage(img,0,0,cv.width,cv.height); }
-  else { ctx.fillStyle="#111"; ctx.fillRect(0,0,cv.width,cv.height);
-         ctx.fillStyle="#666"; ctx.font="20px sans-serif"; ctx.fillText("kare bekleniyor…",20,40); }
-  // tespit kutuları (piksel → canvas)
-  if(natW) for(const b of boxes||[]){
+  // MJPEG'de naturalWidth ilk kareden sonra sabit — kutular doğal→görünen ölçeğiyle çizilir.
+  natW=live.naturalWidth||natW; natH=live.naturalHeight||natH;
+  if(natW) for(const b of lastBoxes||[]){
     ctx.strokeStyle="#e05252"; ctx.lineWidth=2;
     ctx.strokeRect(b.x*cv.width/natW, b.y*cv.height/natH, b.w*cv.width/natW, b.h*cv.height/natH);
   }
-  // kayıtlı ROI (sarı dolgulu)
   const poly=roiDraft??roi;
   if(poly.length){
     ctx.beginPath();
@@ -182,20 +213,15 @@ function draw(boxes){
     if(!roiDraft){ ctx.fillStyle="rgba(231,180,22,.13)"; ctx.fill(); }
     for(const p of poly){const[x,y]=toCanvas(p); ctx.fillStyle="#e7b416"; ctx.beginPath(); ctx.arc(x,y,4,0,7); ctx.fill();}
   }
+  requestAnimationFrame(draw);
 }
-let lastBoxes=[];
-async function refresh(){
+async function pollDetections(){
   if(!cam)return;
   try{
-    const r=await fetch(`/api/snapshot/${cam}?t=${Date.now()}`);
-    if(r.ok){ const blob=await r.blob(); const url=URL.createObjectURL(blob);
-      await new Promise(res=>{img.onload=()=>{natW=img.naturalWidth;natH=img.naturalHeight;res();};img.src=url;});
-      URL.revokeObjectURL(url); }
     const d=await(await fetch(`/api/detections/${cam}`)).json();
     lastBoxes=d.boxes||[];
-    if(!roiDraft) roi=parseRoi(d.roi);
+    if(!roiDraft){ roi=parseRoi(d.roi); $("roiBadge").textContent = roi.length?`ROI: kayıtlı ✓ (${roi.length} nokta)`:"ROI: yok (tüm kare)"; }
   }catch{}
-  draw(lastBoxes);
 }
 const parseRoi=s=>!s?[]:s.split(";").map(p=>p.split(",").map(Number)).filter(p=>p.length===2&&p.every(Number.isFinite));
 const roiToStr=pts=>pts.map(p=>Math.round(p[0])+","+Math.round(p[1])).join(";");
@@ -204,28 +230,23 @@ cv.addEventListener("click",e=>{
   if(!roiDraft)return;
   const r=cv.getBoundingClientRect();
   roiDraft.push([(e.clientX-r.left)/r.width*1000,(e.clientY-r.top)/r.height*1000]);
-  draw(lastBoxes);
 });
-cv.addEventListener("dblclick",e=>{
-  if(!roiDraft||roiDraft.length<3)return;
-  e.preventDefault();
-  $("roiSave").disabled=false;
-});
-$("roiDraw").onclick=()=>{roiDraft=[];$("roiSave").disabled=true;$("roiCancel").disabled=false;draw(lastBoxes);};
-$("roiCancel").onclick=()=>{roiDraft=null;$("roiSave").disabled=true;$("roiCancel").disabled=true;draw(lastBoxes);};
+cv.addEventListener("dblclick",e=>{ if(roiDraft&&roiDraft.length>=3){e.preventDefault();$("roiSave").disabled=false;} });
+$("roiDraw").onclick=()=>{roiDraft=[];$("roiSave").disabled=true;$("roiCancel").disabled=false;};
+$("roiCancel").onclick=()=>{roiDraft=null;$("roiSave").disabled=true;$("roiCancel").disabled=true;};
 $("roiSave").onclick=async()=>{
   await fetch(`/api/roi/${cam}`,{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({roi:roiToStr(roiDraft)})});
   roi=roiDraft; roiDraft=null;
-  $("roiSave").disabled=true;$("roiCancel").disabled=true; draw(lastBoxes);
+  $("roiSave").disabled=true;$("roiCancel").disabled=true;
+  $("roiBadge").textContent=`ROI: kayıtlı ✓ (${roi.length} nokta)`;
 };
 $("roiClear").onclick=async()=>{
   if(!confirm("Bu kameranın ROI'si temizlensin mi? (Tüm kare okunur)"))return;
   await fetch(`/api/roi/${cam}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({roi:""})});
-  roi=[];roiDraft=null;draw(lastBoxes);
+  roi=[];roiDraft=null;$("roiBadge").textContent="ROI: yok (tüm kare)";
 };
 
-// ---- kamera sekmeleri ----
 async function init(){
   const h=await(await fetch("/health")).json();
   cams=h.cameras.map(c=>({id:c.id,name:c.name}));
@@ -234,12 +255,15 @@ async function init(){
     const b=document.createElement("button");
     b.textContent=c.name||c.id;
     b.onclick=()=>{cam=c.id;[...t.children].forEach(x=>x.classList.remove("on"));b.classList.add("on");
-                   roiDraft=null;$("roiSave").disabled=true;$("roiCancel").disabled=true;render();refresh();};
+                   roiDraft=null;$("roiSave").disabled=true;$("roiCancel").disabled=true;
+                   setStream(); render(); pollDetections();};
     if(i===0){b.classList.add("on");cam=c.id;}
     t.appendChild(b);
   });
-  connect(); render(); refresh();
-  setInterval(refresh,1000);
+  await backfill();
+  connect(); setStream(); render(); pollDetections();
+  setInterval(pollDetections,1000);
+  requestAnimationFrame(draw);
 }
 init();
 </script>
