@@ -156,3 +156,31 @@ not: cadde imzasına ek 'tek-kamera uzun-menzil' sınıfı var (koridor-boş gö
 - Eğitim akışı: `docs/finetune-runbook.md` · Dağıtım: `docs/deployment-checklist.md`
 - Araçlar: `scripts/camera_compare.py`, `scripts/regression.sh`, `scripts/autolabel.py`, `Anpr.Bench`
 - Veri: `dataset/finetune` (1468 kırpıntı/127 plaka), `dataset/diag4` (kamera-etiketli referans set)
+
+## 5d. Güncelleme (2026-07-07 öğleden sonra): Gözlem katmanı + kanıt kırpıntısı + çapraz-kamera
+
+Kullanıcı hedefi netleştirdi: panelde kameranın okuduğu HER plaka bizde de yeşil düşmeli. Üç geliştirme:
+
+1. **Gözlem katmanı**: ROI dışı tespitlerden kare başına en büyük 2'sine OCR (`ObservationMaxPerFrame`);
+   olaylar `Scope=gozlem` ile yayınlanır, webhook/bariyer kanalına GİRMEZ, panelde "uzak" rozetiyle
+   eşleşir. Aktif-fps yalnız bölge-içi tespitle tetiklenir (cadde trafiği CPU'yu boğmasın).
+   (Not: kullanıcı 14:29'da iki ROI'yi panelden temizledi → şu an tüm-kare modu; ROI yeniden çizilirse
+   gözlem katmanı devreye girer ve bariyer kanalı yine temiz kalır.)
+2. **Kanıt kırpıntısı (E2)**: her emitte en iyi kırpıntı `evidence/` altına JPEG yazılır, panelde
+   satır yanında küçük resim. 1-fark ihtilafları artık gözle karara bağlanıyor (ör. 24ACB277/270:
+   kanıtta son hane açıdan kesik — kamera muhtemelen haklı; 06FL4666: girişte 4656 okuduk ama
+   çıkışta 4666 birebir — açıya bağlı).
+3. **Çapraz-kamera eşleşmesi**: cadde-geçişi araçları kamera A'da kayıtlıyken biz B'de okuyabiliyoruz;
+   panel artık kalan kırmızıları diğer kameranın okumasıyla eşleyip "⇄ diğer kamera" rozetiyle
+   yeşile çeviriyor (dürüst: aynı fiziksel araç bizim sistemce okundu).
+
+**Çok-kareli PİKSEL füzyonu ÖLÇÜLDÜ ve ELENDİ**: s1 setinde degrade 0-3'ün tümünde tek-kare 8/8'e
+karşı füzyon 3-5/8 (hizasız kırpıntı ortalaması karakter bulanıklaştırıyor). `MultiFrameFusion`
+varsayılan KAPALI; bizim bulanıklık silahımız zaten olasılık-uzayında birikimli oylama + TR-kısıtlı
+çözümleme (varsayılan açık).
+
+**Canlı pencere (14:44-15:01, tüm-kare modu)**: kamera 30 kayıt → 22 birebir, 3 tek-fark, 5 kaçan;
+kaçanların 4'ü cadde-imzalı ve 3'ünü diğer kameramız okudu; tek gerçek kaçanı (25LK99x) kameranın
+kendisi de iki kamerada FARKLI okudu. **25ADY647'yi iki kameramız güven 1.00 ile okudu — Hikvision
+hiç kaydetmedi** (kamerayı geçtiğimiz ölçülü örnek). Panel (giriş): birebir %69, sadece-kamera 1.
+diag4 regresyonu değişmedi (22/26). CPU %25, RSS ~265MB (tüm-kare + 2 gözlem OCR dahil).

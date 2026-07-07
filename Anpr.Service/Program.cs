@@ -122,15 +122,6 @@ app.MapGet("/evidence/{file}", (string file) =>
     return File.Exists(path) ? Results.File(path, "image/jpeg") : Results.NotFound();
 });
 
-// Kanıt kırpıntıları (panel küçük resimleri). Dosya adı sıkı doğrulanır (path traversal yok).
-app.MapGet("/evidence/{file}", (string file) =>
-{
-    if (string.IsNullOrEmpty(file) || file.Contains("..") || file.Contains('/') || file.Contains('\\') || !file.EndsWith(".jpg"))
-        return Results.NotFound();
-    string path = Path.Combine(AppContext.BaseDirectory, "evidence", file);
-    return File.Exists(path) ? Results.File(path, "image/jpeg") : Results.NotFound();
-});
-
 // --- Canlı karşılaştırma paneli ---
 app.MapGet("/panel", () => Results.Content(PanelPage.Html, "text/html; charset=utf-8"));
 

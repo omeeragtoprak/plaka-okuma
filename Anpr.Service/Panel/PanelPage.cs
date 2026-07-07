@@ -120,8 +120,8 @@ function push(f,side,rec,key){ if(f.keys.has(key))return; f.keys.add(key);
   }
   arr.push(rec); if(arr.length>200)arr.shift(); }
 
-function rematch(f){
-  f.cam.forEach(r=>{r.match="red";r.pair=null;});
+function rematch(f,other){
+  f.cam.forEach(r=>{r.match="red";r.pair=null;r.cross=false;});
   f.ours.forEach(r=>{r.match="blue";r.pair=null;});
   for(const o of f.ours){
     let best=null,bestD=2;
@@ -132,6 +132,19 @@ function rematch(f){
       if(d<bestD){bestD=d;best=c;if(d===0)break;}
     }
     if(best){o.pair=best;best.pair=o;o.match=best.match=(bestD===0?"green":"yellow");}
+  }
+  // 2. geçiş: kalan kırmızılar cadde-geçişi olabilir — BİZİM DİĞER kameradaki okumayla eşle (⇄).
+  if(other){
+    for(const c of f.cam){
+      if(c.pair)continue;
+      let bestD=2, hit=null;
+      for(const o of other.ours){
+        if(Math.abs(c.t-o.t)>45000)continue;
+        const d=lev(compact(c.plate),compact(o.plate));
+        if(d<bestD){bestD=d;hit=o;if(!d)break;}
+      }
+      if(hit){c.match=(bestD===0?"green":"yellow");c.cross=true;}
+    }
   }
 }
 function board(f){
@@ -153,7 +166,8 @@ function row(r,side){
   const d=document.createElement("div");
   d.className="row m-"+r.match+(side==="ours"&&r.scope==="gozlem"?" obs":"");
   const time=new Date(r.t).toLocaleTimeString("tr-TR");
-  const tag=side==="ours"&&r.scope==="gozlem"?' <span class="scopetag">uzak</span>':"";
+  let tag=side==="ours"&&r.scope==="gozlem"?' <span class="scopetag">uzak</span>':"";
+  if(side==="cam"&&r.cross)tag+=' <span class="scopetag" title="bizim diğer kamera okudu">⇄ diğer kamera</span>';
   const times=r.n>1?" ×"+r.n:"";
   const thumb=side==="ours"&&r.ev?`<a href="/${r.ev}" target="_blank"><img class="thumb" src="/${r.ev}" alt=""></a>`:"";
   d.innerHTML=`<span class="plate">${r.plate}</span>${tag}${thumb}
@@ -163,7 +177,8 @@ function row(r,side){
 function render(){
   if(!cam)return;
   const f=ensure(cam);
-  rematch(f); board(f);
+  const oc=cams.find(c=>c.id!==cam);
+  rematch(f, oc?ensure(oc.id):null); board(f);
   $("camRows").replaceChildren(...f.cam.slice(-60).reverse().map(r=>row(r,"cam")));
   $("ourRows").replaceChildren(...f.ours.slice(-60).reverse().map(r=>row(r,"ours")));
   $("camCount").textContent=f.cam.length+" kayıt";
@@ -185,7 +200,7 @@ function connect(){
     const f=ensure(m.cameraId);
     const rec={plate:m.plate,t:Date.parse(m.timeIso),conf:m.conf,scope:m.scope,ev:m.ev};
     push(f, m.source==="camera"?"cam":"ours", rec, m.source+"|"+m.plate+"|"+m.timeIso);
-    if(m.cameraId===cam)render();
+    render();
   };
 }
 
