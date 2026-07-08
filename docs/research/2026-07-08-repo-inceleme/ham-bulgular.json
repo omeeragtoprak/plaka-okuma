@@ -1,0 +1,355 @@
+{
+  "summary": "Listelenen ANPR repolarının kod seviyesinde derin incelemesi — bizim projeye aktarılabilir teknikler",
+  "agentCount": 4,
+  "logs": [
+    "4/4 repo incelemesi bitti; toplam 24 aktarım adayı"
+  ],
+  "result": {
+    "repos": [
+      {
+        "key": "alprnet",
+        "summary": "AlprNet (github.com/Temppus/AlprNet) MIT lisanslı, tek günde (2025-10-26, 17 commit) yazılmış ve o günden beri (8.5+ ay) hiç commit almamış, 0 yıldız / 0 fork / 0 issue, NuGet'e yayınlanmamış \"WIP\" bir kütüphane; toplam ~550 satır C# koddan ibaret. Pipeline'ı bizimkinin fakir bir alt kümesi: tek-görüntü tespit (yolo-v9 end2end, [N,7] çıktı parse, 0.25 eşik, letterbox-114) + tek aşama OCR decode (slot argmax) — tracking, oylama, çoklu-kare, gramer kısıtı, ROI, RTSP/video, NMS kodu, asenkron, session ayarı HİÇBİRİ yok. Kamuya açık API'si Mat (OpenCvSharp4 4.11) tipleri üzerine kurulu, yani bizi elemeye iten arm64 OpenCV bağımlılığı izole edilemez şekilde çekirdekte. Bilinen softmax çift-uygulama hatasını kodda doğruladım: CCT modellerinin çıktısı zaten olasılık (fast-plate-ocr referans postprocess'i softmax uygulamaz, doğrudan np.max alır) ama AlprNet C#'ta tekrar Softmax uyguluyor — metin/argmax değişmez fakat karakter güvenleri ~1/vocab'a ezilir, güven çıktısı kullanılamaz (bizim kodda bu zaten yorum satırıyla belgelenmiş). İkinci bir doğruluk hatası daha buldum: recognizer, config'deki keep_aspect_ratio alanını parse edip HİÇ kullanmıyor ve her zaman letterbox yapıyor; oysa cct modelleri keep_aspect_ratio=false ile (düz stretch) eğitilmiş — eğitim/çıkarım ön-işleme uyumsuzluğu doğruluk kaybettirir (biz config'e göre doğru dallanıyoruz). Ufak kusurlar: pad karakterini rstrip yerine her yerden Replace ile siliyor, letterbox'ta tek-pikselli tam-bölme kaybı var, interpolation switch'inde erişilemez Cubic dalı var, demo detections.Single() ile 0 veya 2+ plakada patlar. Bizde olmayan tek gerçek mekanik incelik: OCR'ı Mat[] alıp tek [N,H,W,C] uint8 tensörüyle TEK session.Run'da toplu çalıştırması — bizim AnprEngine.RecognizeCore kare başına kırpıntıları döngüyle tek tek OCR'lıyor. Ayrıca ConsoleApp'teki model kataloğu, denemediğimiz yolo-v9-s-608 ve t-640 end2end tespit modellerinin indirme adreslerini (ankandrew/open-image-models, \"assets\" release tag'i) veriyor — uzak/küçük plaka sorunumuz (a) için düşük frekanslı ek 'uzak-alan taraması' adayı. Üçüncü küçük bulgu: AlprNet aynı model ailesini ONNX Runtime 1.23.2 ile sorunsuz çalıştırıyor; biz 1.20'deyiz ve 1.21-1.23 CPU EP iyileştirmeleri ölçmeye değer. DÜRÜST KIYAS: raporun 'birincil aday' nitelemesi savunulamaz — biz aynı modelleri (yolo-v9-t-384 + fine-tune cct_xs_v2) zaten çok daha zengin ve bu iki hatadan arınmış bir boru hattında çalıştırıyoruz; AlprNet'i benimsemek her eksende gerileme + arm64 engelinin geri gelmesi olur. Gece %84 (c), açılı son hane (b), bulanık kırpıntı (d) ve çift-emit (f) sorunlarımıza AlprNet'in sunduğu hiçbir şey yok; kütüphaneden alınabilecek her şey yukarıdaki üç 'steal'den ibaret.",
+        "steals": [
+          {
+            "technique": "Toplu (batched) OCR çıkarımı — kare başına N kırpıntıyı tek session.Run'da işleme",
+            "how": "AlprNet.Lib/PlateRecognition/LicensePlateRecognizer.cs'teki BuildUint8Batch deseni: Recognize(IReadOnlyList<SKBitmap>) aşırı yüklemesi ekle; [N,H,W,C] tek DenseTensor<byte> doldur (bizim CopyInto zaten batchIdx parametresiyle genellenebilir), AnprEngine.RecognizeCore'da ROI-içi + gözlem-bütçesi kırpıntılarını önce biriktirip tek Run çağır, sonra logits'i n*slots*vocab dilimleyerek mevcut Decode/TrConstrainedDecoder'a ver. ÖN KOŞUL: fine-tune cct_xs_v2 ONNX'imizin batch ekseni dinamik mi kontrol et (fast-plate-ocr varsayılan dışa aktarımı dinamiktir; sabitse dynamic_axes ile yeniden export).",
+            "value": "ONNX Runtime çağrı başına sabit maliyeti (dispatch, thread-pool uyandırma, alloc) amorti eder; kare başına 2-4 kırpıntı olduğunda OCR aşamasında tahmini %10-25 süre kazancı → gözlem katmanı aynı CPU bütçesiyle daha çok plaka okur (sorun a'ya dolaylı katkı) ve zayıf CPU'da (e) genel marj açar. Bench bataryasıyla ölçülebilir: kırpıntı/sn ve kare gecikmesi.",
+            "cost": "Düşük: ~1 gün implementasyon + bench; risk düşük (decode yolu değişmez). Zayıf CPU'da tek Run içindeki paralellik intra-op thread sayısıyla sınırlı — kazanç overhead amortismanından gelir, mucize beklenmemeli; N büyüdükçe tekil kare gecikmesi artar, N'i ObservationMaxPerFrame ile sınırla.",
+            "source": "https://github.com/Temppus/AlprNet/blob/main/AlprNet/AlprNet.Lib/PlateRecognition/LicensePlateRecognizer.cs (Run(Mat[]) + BuildUint8Batch + CopyResizedPlate)"
+          },
+          {
+            "technique": "Uzak-alan taraması: aynı model ailesinin denenmemiş büyük varyantları (yolo-v9-s-608, yolo-v9-t-640) ek düşük-frekanslı ikinci dedektör olarak",
+            "how": "AlprNet'in model kataloğu indirme adreslerini veriyor: https://github.com/ankandrew/open-image-models/releases/download/assets/yolo-v9-s-608-license-plates-end2end.onnx (ve t-640). İkinci bir LicensePlateDetector oturumu aç (kodumuz girdi boyutunu InputMetadata'dan zaten okuyor, sınıf değişikliği gerekmez); ana t-384 döngüsüne DOKUNMADAN her 2-5 saniyede bir (veya ROI boşken) tam kareyi s-608/t-640'a ver, çıkan uzak/küçük tespitleri gözlem katmanına/track başlatmaya besle. NOT: elenen şey 256/512'nin fps2'de ANA dedektörü değiştirmesiydi; bu ADDITIF seyrek tarama — yeni varyant.",
+            "value": "Doğrudan sorun (a): 384 girişte kaybolan uzak/küçük plakalar 608/640 girişte ~1.6-1.7x daha büyük piksel alanı bulur; araç daha ROI'ye girmeden track+oylama başlar, kapıda karar süresi kısalır. Ölçüm: kamera-referanslı bataryada 'ilk tespit mesafesi' ve uzak plaka tespit oranı.",
+            "cost": "Orta: s-608 zayıf Intel CPU'da kare başına tahmini 0.4-1.0 sn (t-640 daha ucuz, önce onu dene); seyrek tetik (0.2-0.5 Hz) + düşük öncelikli görevle ana döngü fps'i korunur. Implementasyon ~1-2 gün; AVX'siz hedef PC'de gerçek süre mutlaka yerinde ölçülmeli.",
+            "source": "https://github.com/Temppus/AlprNet/blob/main/AlprNet/AlprNet.ConsoleApp/PlateDetection/PlateDetectionModelsRepository.cs"
+          },
+          {
+            "technique": "ONNX Runtime 1.20 → 1.23.2 sürüm yükseltmesi (aynı model ailesiyle uyumluluğu AlprNet tarafından fiilen kanıtlanmış)",
+            "how": "Microsoft.ML.OnnxRuntime paketini 1.23.2'ye çek (AlprNet.Lib.csproj aynı yolo-v9 end2end + CCT modellerini 1.23.2 ile çalıştırıyor); mevcut SessionOptions ve kod hiç değişmeden derlenir. Bench bataryasını iki sürümle koştur, tespit+OCR gecikmelerini karşılaştır; ayrıca 1.23'te eski quantize edilmiş operatör desteği genişlediği için daha önce 'ConvInteger C#'ta yok' diye elenen INT8 dynamic quant'ı yeni ORT'ta BİR KEZ yeniden dene (elenen sonucun yeni varyantı).",
+            "value": "ORT 1.21-1.23 CPU EP'de çekirdek/threading iyileştirmeleri içeriyor; sıfır kod değişikliğiyle olası %5-15 çıkarım hızlanması → (e) zayıf CPU marjı. INT8 yeniden denemesi tutarsa OCR/tespit süresinde ek büyük kazanç kapısı açılır.",
+            "cost": "Çok düşük: paket sürümü + tam regresyon bataryası (exact-match oranı sabit kalmalı). Risk: AVX'siz hedef Intel'de resmi ORT binary'sinin davranışı yerinde doğrulanmalı; sorun çıkarsa 1.20'ye geri dönüş tek satır.",
+            "source": "https://github.com/Temppus/AlprNet/blob/main/AlprNet/AlprNet.Lib/AlprNet.Lib.csproj"
+          }
+        ],
+        "facts": [
+          "Lisans: MIT. Repo 2025-10-26'da oluşturulmuş, TÜM 17 commit aynı gün; son push 2025-10-26 19:05 UTC — bugüne dek (2026-07-08) 8.5+ ay sıfır aktivite. 0 yıldız, 0 fork, 0 açık issue, yol haritası yok, NuGet paketi yok (README: 'WIP, cilalanınca yayınlanacak').",
+          "Bağımlılıklar (AlprNet.Lib.csproj): net8.0 (README'nin '.NET Standard' iddiası yanlış), Microsoft.ML.OnnxRuntime 1.23.2, OpenCvSharp4 4.11.0.20250507, YamlDotNet 16.3.0. Public API Mat tipleri üzerine kurulu → OpenCV bağımlılığı izole edilemez; bizi elemeye götüren arm64 sorunu kütüphanenin çekirdeğinde.",
+          "Kapsam: ~550 satır; SADECE tek-görüntü tespit + tek-görüntü OCR. Tracking YOK, oylama YOK, çoklu-kare mantığı YOK, video/RTSP YOK, ROI YOK, gramer/format kısıtı YOK, NMS kodu YOK (NMS'i gömülü end2end ONNX modellere bırakıyor — bizim kullandığımız aynı aile), SessionOptions varsayılan (thread/optimizasyon ayarı yok), asenkron çıkarım yok.",
+          "Softmax çift-uygulama hatası KODLA DOĞRULANDI: fast-plate-ocr referansında postprocess softmax uygulamaz (model çıktısı zaten olasılık; np.max direkt güven olur), AlprNet LicensePlateRecognizer.PostProcess ise logits'e tekrar Softmax uygular → argmax/metin değişmez ama karakter güvenleri ~1/vocab'a ezilir, güven çıktısı fiilen kullanılamaz. (Bizim Anpr.Core/Recognition/LicensePlateRecognizer.cs:112-115 bu hatayı zaten yorumla belgeliyor.)",
+          "İkinci doğruluk hatası: AlprNet config'deki keep_aspect_ratio'yu parse edip HİÇ KULLANMIYOR — CopyResizedPlate her zaman letterbox+114 yapıyor; oysa CCT modelleri keep_aspect_ratio=false (düz stretch) ile eğitilmiş (fpo_process.py resize_image: false ise cv2.resize doğrudan). Eğitim/çıkarım ön-işleme uyumsuzluğu = doğruluk riski. Bizim kod config'e göre doğru dallanıyor.",
+          "Ufak kusurlar: pad karakteri rstrip yerine string.Replace ile HER yerden siliniyor (orta-slot pad tahmininde kayma yaratır); dedektör letterbox'ında tam-bölme dw/dh tek pikseli düşürür (referans round(dh±0.1) kullanır); interpolation switch'inde erişilemez Cubic varsayılanı; demo Program.cs detections.Single() ile 0 veya 2+ plakada exception.",
+          "Model kataloğu (ConsoleApp repository sınıfları): tespit yolo-v9 {t-256, t-384, t-416, t-512, t-640, s-608} end2end — ankandrew/open-image-models 'assets' release tag'i; OCR {cct_s/xs_v1 (+relu), arg_cnn, european/global mobile_vit_v2} — ankandrew/cnn-ocr-lp. OCR modelleri v1; bizim kullandığımız cct_xs_v2 kataloglarında bile yok.",
+          "Tespit son-işleme: end2end çıktı [N,7] = [id,x1,y1,x2,y2,class_id,score], eşik 0.25, koordinatlar letterbox'tan geri çevrilip clamp; kırpma ToPlateCropImage bbox'ı OLDUĞU GİBİ keser — kenar payı/padding YOK (bizde CropPaddingRatio=0.06 var). Dedektör ön-işlemesi per-piksel Mat.At<Vec3f> ile yavaş naif kopya.",
+          "Bizde zaten olup AlprNet'te de olanlar (yeni değil): girdi boyutunu InputMetadata'dan türetme, NHWC uint8 OCR girdisi, YAML config'ten alphabet/slots okuma, [N,7] end2end parse — hiçbiri steal değil.",
+          "DÜRÜST KIYAS SONUCU: 'birincil aday' nitelemesi savunulamaz. AlprNet, bizim zaten çalıştırdığımız modellerin çevresinde, bizim boru hattımızın katı bir alt kümesi + iki doğruluk hatası + arm64'ü kıran OpenCV bağımlılığı + ölü bakım. Bize katabileceği her şey 3 steal'e indirgendi; sorunlarımızdan (b) açılı son hane, (c) gece, (d) bulanıklık ve (f) çift-emit için hiçbir şey içermiyor.",
+          "İncelenen dosyaların yerel kopyaları: /private/tmp/claude-501/-Users-omer-Desktop-plakaokuma/31305ab5-eac8-415a-b32a-482461d37358/scratchpad/alprnet/ (LicensePlateDetector.cs, LicensePlateRecognizer.cs, ModelConfig.cs, LicensePlateDetectionResult.cs, Program.cs, iki ModelsRepository, csproj'lar, README.md, fast-plate-ocr referansı fpo_process.py)."
+        ]
+      },
+      {
+        "key": "fast-plate-ocr-ekosistemi",
+        "facts": [
+          "Lisans/bakım: üç repo da MIT; fast-plate-ocr v1.1.0 (13 Mart 2026, 11 release), fast-alpr v0.4.0 (Mart 2026), open-image-models v0.5.1 (Eylül 2025) — hepsi aktif bakımda.",
+          "Model zoo GÜNCEL DURUM: cct-xs-v2 / cct-s-v2'den SONRA yeni OCR modeli YOK (hub: v2, v1, relu-v1, eski MobileViTV2 ve Arjantin CNN modelleri). Kullandığımız cct_xs_v2 hâlâ en güncel XS model.",
+          "cct_xs_v2 mimari (models/cct_xs_v2.yaml): 7 Conv2D tokenizer (32→96 filtre, silu) + MaxBlurPooling2D (anti-alias pooling), patch_size 2, 3 transformer katmanı, 2 head, projection_dim 96, DyT (dynamic tanh) normalizasyon, stochastic_depth 0.1, SeqPool + token reducer; giriş 64x128 RGB uint8, 1/255 normalizasyon MODEL İÇİNDE.",
+          "v2 global plate config: max_plate_slots 10, keep_aspect_ratio FALSE (direkt stretch resize), linear interpolasyon, RGB; plate_regions 65 ülke ('Turkey' dahil) — v2 modellerde bölge tanıma başlığı var (val_region_macro_f1 > 0.99, 114k örneklik validasyonda).",
+          "v2 eğitim verisi v1'in ~3 katı; CHANGELOG: 'V2 training now includes empty plates built from backgrounds, noise, textures' — trainer boş plate_text'i doğal destekler (annotations.py: fillna('') → tüm-pad etiket).",
+          "Varsayılan eğitim reçetesi (cli/train.py): AdamW lr=1e-3, cosine decay (final_lr_factor=1e-2) + %5 lineer warmup, weight_decay=0.01 (bias/layer_norm HARİÇ), clipnorm=1.0, EMA VARSAYILAN AÇIK (SwapEMAWeights checkpoint'e EMA ağırlığı yazar), label_smoothing=0.01, batch 64, 150 epoch, early-stop patience 100 (val_plate_acc), opsiyonel focal_cce (alpha 0.25, gamma 2.0); region head varsa loss ağırlığı plate 0.9 / region 0.1.",
+          "Varsayılan augmentation (RGB, augmentation.py): Affine rotate ±12°/scale 0.8-1.10/translate ±%2 p=0.65 ama SHEAR=(0,0) ve PERSPEKTİF YOK; BrightnessContrast ±0.10 p=0.4; HSV/RGBShift p=0.25; PlanckianJitter 5500-7000K p=0.1; RandomGamma 95-105 p=0.15; ToGray p=0.05; Downscale 0.75-0.95 p=0.1; GaussianBlur σ0.2-0.5 veya MotionBlur 3 p=0.15; dilate/erode p=0.1; GaussNoise/MultiplicativeNoise/ISONoise/JPEG(55-90) p=0.25; CoarseDropout/PixelDropout/GridDropout p=0.25. CLI --augmentation-path ile özel Albumentations YAML enjekte edilebilir; visualize_augmentation CLI'si var.",
+          "Multiline (issue #39, kapalı): çift satır plakalar desteklenmiyor, karakterler karışık sırada çıkıyor; maintainer çözümü = kendi çift-satır verinle fine-tune + tutarlı etiketleme (satırları tek dizgeye birleştir); kod tarafında plan yok.",
+          "fast-alpr pipeline (alpr.py): tespit bbox'ı MARJSIZ kırpar (sadece görüntü sınırına clamp), kırpıntıyı fast-plate-ocr'a verir; OCR öncesi tek ön-işleme BGR→RGB + stretch resize. Bizimkinden farklı bir zekâ yok — çok-kare oylama, gramer kısıtı, track birleştirme hiçbiri yok (tek-kare kütüphane).",
+          "Detektör zoo (open-image-models): yolo-v9-t 256/384/416/512/640 + yolo-v9-s 608. Recall: 256→0.797, 384→0.863, 416→0.894, 512→0.901, 608(s)→0.917. Kare girdi zorunlu (h==w assert), letterbox 114-gri pad + scaleup=True, çıktı end2end NMS'li [x,bbox,cls,score].",
+          "OpenVINO EP somut: Python'da fast-plate-ocr[onnx-openvino] extra'sı (onnxruntime-openvino) — iddia sadece nitel: 'Best on Intel CPUs', sayı yok. C# için Intel'in resmi NuGet'i Intel.ML.OnnxRuntime.OpenVino 1.24.1 (Microsoft.ML.OnnxRuntime.Managed ile eşleşir, native paketin yerine geçer). KRİTİK: OpenVINO 2025.x minimum SSE4.2 (AVX'siz eski Intel'de çalışır), 2026.0'dan itibaren AVX2 ZORUNLU — hedef PC'nin AVX durumu bilinmediğinden 2025.x tabanlı EP sürümüne sabitlenmeli.",
+          "1.0.2'de opencv-python → opencv-python-headless geçişi; inference paketi hâlâ OpenCV'ye bağımlı (bizim SkiaSharp kararımızı etkilemez, sadece Python eğitim tarafı).",
+          "İncelenen dosyalar yerelde: /private/tmp/claude-501/-Users-omer-Desktop-plakaokuma/31305ab5-eac8-415a-b32a-482461d37358/scratchpad/ altında (augmentation.py, cli_train.py, alpr.py, oim_preprocess.py, process.py, plate_recognizer.py, CHANGELOG.md vb.)."
+        ],
+        "steals": [
+          {
+            "technique": "yolo-v9-t-416 detektör varyantı (denenmemiş ara nokta)",
+            "how": "open-image-models release'inden yolo-v9-t-416-license-plate-end2end.onnx indir; mevcut C# tespit hattında model dosyasını değiştir (aynı letterbox 114-gri kare pad, aynı end2end NMS çıktı formatı — kod değişikliği yok, sadece girdi boyutu 416). Kamera-referanslı ölçüm bataryasında 384'e karşı exact/recall/fps kıyasla.",
+            "value": "Sorun (a) uzak/küçük plaka: resmi metriklerde recall 0.863→0.894 (+3.1 puan), mAP50-95 0.687→0.702. 256 ve 512 ölçülüp elendi ama 416 hiç denenmedi — 512'nin fps cezasının yarısından azıyla recall kazanımının çoğunu veriyor.",
+            "cost": "Tespit tarafında ~%17 CPU artışı ((416/384)²=1.17); implementasyon eforu ~sıfır (drop-in model). Zayıf CPU'da uyarlanabilir fps ile telafi edilebilir.",
+            "source": "https://github.com/ankandrew/open-image-models (README model tablosu) + open_image_models/detection/core/yolo_v9/preprocess.py"
+          },
+          {
+            "technique": "Detektör girişini ROI-bounding-square'e kırpma (letterbox pad israfını geri kazan)",
+            "how": "oim_preprocess.py letterbox analizi: 16:9 kare 384x384'e pad'lenince içerik 384x216'ya düşüyor — girişin ~%44'ü gri pad. Kapı ROI poligonumuzun bounding-square'ini SkiaSharp'ta kırpıp 384 detektöre ver (koordinatları geri dönüştür); gözlem katmanı için tam kareyi düşük frekansta ayrı geçir.",
+            "value": "Sorun (a): uzak plakanın detektör girdisindeki piksel boyutu ~1.5-2x artar, 512 modele geçmeden 'efektif çözünürlük' kazanılır. Model ve CPU maliyeti değişmeden küçük plaka görünürlüğü artar — ölçüm: ROI-kırpımlı vs tam-kare tespit oranı.",
+            "cost": "CPU maliyeti ~sıfır (aynı 384 inference, kırpma ucuz); efor düşük-orta (koordinat geri-dönüşümü + gözlem katmanıyla entegrasyon, ~1 gün).",
+            "source": "https://raw.githubusercontent.com/ankandrew/open-image-models/main/open_image_models/detection/core/yolo_v9/preprocess.py (letterbox)"
+          },
+          {
+            "technique": "Fine-tune augmentasyonuna perspektif + shear ekleme (upstream'de YOK)",
+            "how": "Default pipeline'da shear=(0,0) ve A.Perspective hiç yok — cct_xs_v2 açıya sadece ±12° düzlem-içi rotasyonla maruz kalmış. Fine-tune fabrikamızın Albumentations YAML'ına A.Perspective(scale=(0.02,0.08), p=0.3) + A.Affine(shear=(-12,12), p=0.3) ekle; fast-plate-ocr 'visualize_augmentation' CLI'siyle önizleyip 'fast-plate-ocr train --augmentation-path custom.yaml' ile eğit.",
+            "value": "Sorun (b) açılı plakada son hane hatası (24ACB27_ vakası): eğitimde hiç görmediği perspektif bozulmayı öğrenir — naif deskew'un (elendi) aksine girdiyi bozmadan modeli dayanıklılaştırır. Ölçüm: açılı-plaka alt kümesinde slot-bazlı exact.",
+            "cost": "Çalışma zamanı CPU maliyeti SIFIR (yalnız eğitim); efor düşük (YAML + yeniden fine-tune, mevcut runbook'la 1 eğitim koşusu).",
+            "source": "https://raw.githubusercontent.com/ankandrew/fast-plate-ocr/master/fast_plate_ocr/train/data/augmentation.py + docs/training/intro.md"
+          },
+          {
+            "technique": "Gece/kış agresif augmentasyon profili (upstream'in 'mild' değerlerini sertleştir)",
+            "how": "Upstream v2 bilinçli olarak 'milder augmentations' kullanıyor (CHANGELOG). Bizim gece sorunumuz için ayrı profil: brightness_limit=(-0.4,0.1), RandomGamma (60,140), ISONoise intensity (0.02,0.08), MotionBlur blur_limit (3,7), Downscale 0.5-0.9 — kar/gece fine-tune setine uygula; PlanckianJitter'ı sodyum buharı/LED far rengine göre genişlet (3000-7000K).",
+            "value": "Sorun (c) gece %84→%90+ ve (d) bulanık kırpıntılar: upstream default'u gündüz-temiz veriye göre ayarlı; gece degradasyonlarını (sensör gürültüsü, düşük gamma, hareket bulanıklığı) eğitimde simüle etmek fine-tune'un kanıtlanmış kazanç yolunu gece rejimine taşır. Ölçüm: gece alt-kümesi exact.",
+            "cost": "Çalışma zamanı CPU SIFIR; efor düşük (YAML + 1 fine-tune koşusu; mevcut kanıt-kırpıntı JPEG arşivi gece örneği olarak hazır).",
+            "source": "https://raw.githubusercontent.com/ankandrew/fast-plate-ocr/master/fast_plate_ocr/train/data/augmentation.py + CHANGELOG.md ('milder augmentations', 'empty plates')"
+          },
+          {
+            "technique": "Boş-plaka negatif örnekleri → tüm-pad çıktısını çöp-kırpıntı reddi olarak kullan",
+            "how": "v2 eğitim hilesi: arka plan/gürültü/doku kırpıntıları BOŞ plate_text ile eğitime girer (annotations.py fillna('') → 10 slot tamamen '_' hedefi). Fine-tune CSV'mize sahadan yanlış-pozitif/aşırı bulanık kırpıntıları plate_text boş olarak ekle. C# tarafında: slot-0'ın pad('_') olasılığı yüksekse o kareyi oylamaya SOKMA ve emit sayacına yazma.",
+            "value": "Sorun (d) bulanık kırpıntılar + (f) çift-emit varyant zincirleri: model çöpe 'plaka uyduruyor' yerine tüm-pad dağılımı üretmeyi öğrenir; bu, oylama havuzunu kirleten düşük kalite okumaları kaynağında keser. Ölçüm: yanlış-emit oranı ve varyant zinciri sayısı.",
+            "cost": "Çalışma zamanı CPU ~SIFIR (mevcut slot×vocab dağılımından tek olasılık okuma); efor düşük (negatif örnek toplama + 1 fine-tune + C#'ta 5 satır eşik kontrolü).",
+            "value_note": "",
+            "source": "https://raw.githubusercontent.com/ankandrew/fast-plate-ocr/master/fast_plate_ocr/train/data/annotations.py + CHANGELOG.md v1.1.0"
+          },
+          {
+            "technique": "Eğitim reçetesi hizalama: EMA + cosine-warmup + label smoothing + wd-istisna",
+            "how": "Runbook'umuzu upstream default'larıyla kıyasla ve eksikleri ekle: AdamW use_ema=True (SwapEMAWeights ile checkpoint EMA ağırlığı alır), cosine decay final_lr_factor=1e-2 + %5 warmup (fine-tune için lr'ı 1e-4'e düşürüp aynı şema), label_smoothing=0.01, clipnorm=1.0, weight_decay=0.01 ama bias/layer_norm hariç (--wd-ignore). Ayrıca val_plate_len_acc ve top3_acc metriklerini ölçüm bataryamıza ekle.",
+            "value": "Fine-tune kalitesinde bilinen serbest kazanımlar: EMA özellikle az-veri fine-tune'da varyansı düşürür (oylama istikrarımıza doğrudan yansır); label smoothing aşırı-emin yanlış slotları yumuşatır — TAM dağılım biriktiren oylamamız kalibre olasılıktan doğrudan faydalanır. Ölçüm: aynı veri, iki reçete, val_plate_acc + saha exact.",
+            "cost": "Çalışma zamanı CPU SIFIR; efor çok düşük (CLI bayrakları zaten mevcut, 1 kıyas koşusu).",
+            "source": "https://raw.githubusercontent.com/ankandrew/fast-plate-ocr/master/fast_plate_ocr/cli/train.py (satır 180-500: lr/warmup/EMA/label_smoothing defaultları)"
+          },
+          {
+            "technique": "OpenVINO EP — C#/.NET için somut kurulum + AVX tuzağı",
+            "how": "NuGet: Microsoft.ML.OnnxRuntime yerine Intel.ML.OnnxRuntime.OpenVino 1.24.1 + Microsoft.ML.OnnxRuntime.Managed (aynı API; SessionOptions'a OpenVINO EP ekle, device 'CPU'). ÖNCE hedef PC'de CPUID kontrolü yap (AVX/AVX2/SSE4.2): OpenVINO 2025.x min SSE4.2 ile AVX'siz çalışır ama 2026.0+ AVX2 zorunlu — EP sürümünü OpenVINO 2025.x tabanlısına sabitle. cct_xs_v2 + yolo-v9-t ikisini de aynı süreçte CPU EP'ye karşı A/B ölç (bizim ölçüm bataryası).",
+            "value": "Sorun (e) zayıf Intel CPU: upstream'in önerdiği tek CPU hızlandırma yolu ('Best on Intel CPUs' — nicel iddia YOK). AVX2'li CPU'da tipik 1.3-2x graph-level kazanım mümkün; AVX'siz CPU'da kazanç mütevazı kalabilir — bu yüzden taahhütsüz, ölçüme bağlı adım. INT8 ConvInteger sorunumuzun aksine OpenVINO kendi kernel'ını getirir.",
+            "cost": "Efor orta (NuGet değişimi + EP init + hedef PC'de test, ~1 gün); risk: AVX'siz PC'de kazanç çıkmayabilir → CPU EP fallback'i korunmalı. Ek bellek ayak izi ~100-200MB.",
+            "source": "https://github.com/ankandrew/fast-plate-ocr README (onnx-openvino extra) + https://www.nuget.org/packages/Intel.ML.OnnxRuntime.OpenVino + https://docs.openvino.ai/systemrequirements (2026.0 AVX2 şartı)"
+          },
+          {
+            "technique": "Region head'i (Türkiye sınıfı) çöp/yabancı plaka sinyali olarak koru",
+            "how": "Bir sonraki fine-tune'da CSV'ye plate_region kolonu ('Turkey', negatiflere 'Unknown') ekle ve config'e plate_regions yaz — trainer region başlığını korur (loss 0.9 plate / 0.1 region). C#'ta modelin ikinci çıktısından region_prob('Turkey') oku; düşükse (çöp, yabancı, aşırı bozuk kırpıntı) oylama ağırlığını düşür.",
+            "value": "Sorun (d)+(f) için ek, neredeyse bedava güven sinyali: v2 global modelde bu başlık val_region_macro_f1>0.99 — bizim fine-tune'da tek-sınıf+Unknown olarak 'bu gerçekten TR plakası mı' dedektörüne dönüşür. Ölçüm: yanlış-emit'lerde region_prob dağılımı.",
+            "cost": "Çalışma zamanı CPU ~SIFIR (aynı forward'ın ikinci çıktısı); efor düşük-orta (etiket kolonu + fine-tune + C#'ta ikinci output okuma). Not: mevcut fine-tune'umuz region başlığını düşürdüyse yeniden eğitim gerekir.",
+            "source": "https://raw.githubusercontent.com/ankandrew/fast-plate-ocr/master/fast_plate_ocr/cli/train.py + config/latin_plate_config_v2.yaml (plate_regions: 'Turkey' dahil)"
+          }
+        ],
+        "summary": "Üç repo da (fast-alpr 0.4.0, fast-plate-ocr 1.1.0, open-image-models 0.5.1) MIT lisanslı ve aktif bakımda; model zoo'da cct_xs_v2'den YENİ bir OCR modeli yok, yani kullandığımız model hâlâ en güncel. fast-alpr pipeline'ı kod seviyesinde bizden geride: marjsız bbox kırpımı + stretch resize + tek-kare OCR, çok-kare oylama/gramer/track yok — oradan çalınacak şey pipeline değil, eğitim reçetesi. Asıl değer fast-plate-ocr'un eğitim tarafında: varsayılan reçete AdamW 1e-3 + cosine decay + %5 warmup + EMA (varsayılan açık) + label_smoothing 0.01 + clipnorm 1.0, ve --augmentation-path ile enjekte edilebilir Albumentations pipeline'ı. Default augmentation'da kritik bir boşluk bulduk: shear=(0,0) ve perspektif dönüşümü HİÇ yok — açılı plaka hatamız (24ACB27_) doğrudan bununla ilişkili; fine-tune'a A.Perspective+shear eklemek en yüksek değerli çalıntı. İkinci büyük bulgu: v2 eğitimi boş-plaka negatifleri (arka plan/doku, boş plate_text → tüm-pad etiketi) kullanıyor ve trainer bunu doğal destekliyor — bulanık/çöp kırpıntı reddi ve çift-emit zincirlerine ölçülebilir çare. Tespit tarafında 416 varyantı hiç denenmemiş ara nokta (recall 0.863→0.894, maliyet 1.17x) ve letterbox analizi 16:9 karede %44 pad israfı gösteriyor — ROI-bounding-square kırpımı sıfır maliyetle uzak plaka pikselini ~2x büyütür. OpenVINO EP'nin somutu: C# için Intel.ML.OnnxRuntime.OpenVino 1.24.1 NuGet, ama OpenVINO 2026.0+ AVX2 zorunlu — AVX durumu bilinmeyen hedef PC için 2025.x tabanlı sürüme sabitlenip önce CPUID ölçülmeli; upstream'in kazanç iddiası nicel değil. Multiline (issue #39) çözülmemiş; maintainer'ın cevabı bizim zaten yaptığımız 'kendi verinle fine-tune'. cct_xs_v2 mimarisi (MaxBlurPooling, DyT norm, 3 katman/2 head) ve v2'nin bölge başlığı ('Turkey' sınıfı, F1>0.99) not edildi — region çıktısı fine-tune'da korunursa bedava çöp-filtre sinyali. Özet: 8 çalıntının 5'i çalışma zamanı CPU maliyeti sıfır olan eğitim-tarafı iyileştirmeleri, 2'si drop-in tespit deneyi, 1'i koşullu OpenVINO denemesi — hepsi mevcut ölçüm bataryasıyla doğrulanabilir."
+      },
+      {
+        "key": "ort-alpr-wpod",
+        "facts": [
+          "ort-alpr (tharakarehan) lisansı MIT; ancak WPOD-NET agirliklari GPLv3 lisansli sergiomsilva/alpr-unconstrained projesinden donusturulmus (belediye ici kullanim = dagitim yok = GPL yukumlulugu tetiklenmez)",
+          "ort-alpr bakimsiz: ~5 commit, son aktivite ~2022; deger kodda degil model dosyalarinda ve decode matematiginde",
+          "WPOD ONNX modeli: https://github.com/tharakarehan/ort-alpr/raw/master/models/lpd.onnx — 6.57 MB, 1.64M parametre, IR sürümü 7, opset 13 (keras2onnx 1.8.1) — C# Microsoft.ML.OnnxRuntime 1.20 CPU ile TAM uyumlu (IR<=10, opset<=21), ConvInteger YOK (sadece Conv/Relu/MaxPool/Add/Softmax/Concat/Transpose, 68 dugum)",
+          "Model giris/cikis: giris NHWC [N,H,W,3] float32, BGR sirasi, /255 normalize, H ve W dinamik ama 16'nin kati olmali; cikis [N,H/16,W/16,8]: kanal0=plaka olasiligi (softmax), kanal2:8=2x3 affine regresyon",
+          "Olculen CPU sureleri (arm64 Mac, 2 thread, ORT python): 64x128=3.7ms, 96x192=5.4ms, 128x256=7.7ms, 208x208=9.3ms, 256x416=22ms, 416x608=50.6ms; decode+warp ek yuku ~1-7ms; zayif AVX'siz Intel icin 3-8x carpan tahmini",
+          "Kritik dogrulama: WPOD genisletilmis plaka KIRPINTISINDA da calisiyor (arac karesi sart degil) — plaka bbox + 0.5/1.0/1.5x marj, bound 160-256: tum kombinasyonlarda prob 0.99-1.0, 8.8-27ms; agir egik plaka (MH20EE7596) gorsel dogrulamayla tam frontal rektifiye edildi",
+          "Rektifikasyon sinifi: hucre basina affine (6 param) regresyon AMA nihai warp 4 kose quad'dan DLT homografi — bizim olcumde zarar veren naif min-area-rect deskew'den farkli sinif: ogrenilmis kose tespiti + tam perspektif duzeltme, binarizasyona bagimli degil",
+          "Warp detayi (infer_utils.py reconstruct): %10 kenar marji eklenerek warp ediliyor (t_ptsh = W/10 offset) + max-boyut 300'e normalize, quad aspect korunur — son karakterin kesilmemesini garantiler",
+          "C# icin SVD gerekmez: find_T_matrix'in SVD'si 4-nokta homografi icin 8x8 lineer sistem Gauss eliminasyonuyla cozulebilir (~40 satir); warp SkiaSharp SKMatrix perspektif alanlariyla (Persp0/1/2) veya 240x80 cikti icin manuel bilinear inverse-map ile (~19K piksel, mikrosaniyeler)",
+          "PaddleOCR entegrasyonu calintiya degmez: ocr_det.onnx 48.8MB (Cince DB v2 metin dedektoru, rektifiye plaka icinde ayri metin tespiti kosturuyor) + ocr_rec.onnx 8.3MB CRNN (ppocr_keys_v1 Cince sozluk) — bizim sahaya fine-tune cct_xs_v2'den hem agir hem genel amacli",
+          "IWPOD-NET (https://github.com/claudiojung/iwpod-net): MIT lisans, TITS 2021 makalesi (Silva & Jung), weights/iwpod_net.h5 (7.5MB) + .json mevcut, TF2 egitim scripti + loss.py dahil (kendi verimizle fine-tune mumkun); decode kodu WPOD ile birebir ayni (ayni C# decode her ikisine calisir); h5->ONNX icin tek seferlik tf2onnx donusumu gerekir",
+          "Indirilebilir linkler (dogrulandi HTTP 200): WPOD ONNX https://github.com/tharakarehan/ort-alpr/raw/master/models/lpd.onnx | IWPOD h5 https://raw.githubusercontent.com/claudiojung/iwpod-net/master/weights/iwpod_net.h5 | IWPOD json https://raw.githubusercontent.com/claudiojung/iwpod-net/master/weights/iwpod_net.json | (PaddleOCR: .../models/ocr_det.onnx ve ocr_rec.onnx); orijinal wpod-net_update1.h5 raw yolu 404 (script ile indiriliyordu); yerel kopya: /private/tmp/claude-501/-Users-omer-Desktop-plakaokuma/31305ab5-eac8-415a-b32a-482461d37358/scratchpad/lpd.onnx",
+          "Decode sabitleri: stride=16, side=7.75 ((208+40)/2/16), alfa=0.5 kanonik kare, A[0,0] ve A[1,1] >= 0 klempi, NMS IoU 0.1 (quad'in eksen-hizali bbox'i uzerinden), ort-alpr'de kullanilan esik 0.5",
+          "Onemli uyari: rektifikasyon geometriyi duzeltir, bulanikligi DUZELTMEZ — gece/bulanik kirpinti sorunumuz (c,d) icin dogrudan cozum degil; tek goruntuyle dogrulandi, bizim kamera-referansli olcum bataryasiyla acili alt-kumede olculmeli"
+        ],
+        "steals": [
+          {
+            "technique": "WPOD-NET ile opsiyonel ikinci-gecis plaka rektifikasyonu (ogrenilmis quad + DLT homografi warp)",
+            "how": "lpd.onnx'i (6.6MB, opset13/IR7 — ORT 1.20 C# uyumlu) ikinci InferenceSession olarak yukle. Tetik: dusuk guven / TR-gramer tutarsiz / son-hane oynak track'ler (24ACB27_ vakasi). Kirpintiyi TIGHT degil plaka boyutunun ~1.0x marjiyla genisletilmis sakla (SkiaSharp BGRA -> alfa at -> BGR float/255 NHWC, boyut 16'nin katina yuvarla, bound~160-208). Cikti [1,h/16,w/16,8]: kanal0>0.5 hucrelerde A(2x3) x kanonik kare x 7.75 + hucre merkezi = quad; en yuksek olasilikli quad'dan 4-nokta homografiyi 8x8 Gauss eliminasyonuyla coz (SVD gereksiz); SkiaSharp SKMatrix perspektif (Persp0/1/2) veya manuel bilinear inverse-map ile %10 marjli 240x80'e warp; rektifiye kirpintiyi cct_xs_v2'ye ver ve sonucu mevcut slot-vocab oylama birikimine EK gozlem olarak kat (degistirme degil, oy)",
+            "value": "Sorun (b) acili plakada son hane hatasina dogrudan hedefli: naif deskew'den farkli olarak ogrenilmis kose tespiti + tam perspektif duzeltme; agir egik test plakasinda gorsel olarak dogrulanmis frontal cikti (prob~1.0). Oylamaya ek kanal oldugu icin temiz plakalarda regresyon riski dusuk (tetik kapisi + oy birlestirme guvencesi)",
+            "cost": "Model 6.6MB RAM; arm64 2-thread'de 9-17ms/cagri, zayif Intel'de tahmini 30-80ms — yalnizca dusuk guvenli track basina birkac cagri oldugu icin butce ici. Implementasyon ~1-2 gun: decode dongusu ~60 satir + homografi ~40 satir + SkiaSharp warp; OpenCV gerekmez",
+            "source": "https://github.com/tharakarehan/ort-alpr (lpd/infer_utils.py reconstruct + lpd/projection_utils.py find_T_matrix); model: https://github.com/tharakarehan/ort-alpr/raw/master/models/lpd.onnx"
+          },
+          {
+            "technique": "Quad kosesinden olculen perspektif/egiklik metrigi ile oy agirliklama ve tetik kapisi",
+            "value": "Sorun (b) ve (f) icin: egik gozlemlerin oylari sistematik son-hane hatasini beslemez, cift-emit varyant zincirlerinin bir kaynagi (ayni track'in egik ve duz okumalarinin farkli sonuc uretmesi) zayiflar; ayrica rektifikasyon ikinci-gecisini ne zaman calistiracagini nesnel olarak secer",
+            "how": "WPOD calistiginda quad zaten elde: ust/alt kenar egim acisi + sol/sag kenar uzunluk orani (perspektif siddeti) hesapla (10 satir aritmetik). Bu skoru (a) slot-vocab oylamasinda gozlem agirligi olarak kullan (egik gozlemin olasilik dagilimini down-weight et), (b) rektifikasyon tetigi esigi olarak kullan; events.jsonl'e logla ki olcum bataryasinda acili alt-kume otomatik etiketlensin",
+            "cost": "Sifira yakin CPU (quad zaten hesaplanmis); implementasyon yarim gun; olculebilir: acili alt-kumede exact-match delta",
+            "source": "lpd/infer_utils.py reconstruct() quad ciktisi (ptsh 4 kose)"
+          },
+          {
+            "technique": "Marjli + aspect-koruyan homografi warp deseni (W/10 kenar payi, max-boyut normalize)",
+            "how": "Herhangi bir warp/kirpma adimimizda hedef dikdortgene dogrudan degil, her kenara hedef boyutun %10'u kadar pay ekleyerek warp et (t_ptsh = getRectPts(W/10, H/10, W/10+W, H/10+H), canvas 1.2Wx1.2H) ve quad'in kendi en-boy oranini koru (max kenari sabitle, digerini oranla); OCR'a bu payli goruntuyu ver",
+            "value": "Sorun (b) son-hane kesilmesi vakalarina dogrudan: kose tespiti 1-2 piksel dar kaldiginda bile son karakter govdesi kadrajda kalir; ayrica kanit kirpintisi JPEG'lerinin okunabilirligini artirir. Bizim mevcut tight-bbox kirpintimizda kenar karakteri kismen kesiliyorsa sifir maliyetli kazanc",
+            "cost": "Sifir ek CPU (ayni warp, farkli hedef koordinatlar); implementasyon 1-2 saat; kirpinti bataryasinda son-karakter dogrulugu ile olculur",
+            "source": "lpd/infer_utils.py reconstruct() satir 83-85"
+          },
+          {
+            "technique": "IWPOD-NET (MIT) — lisans-temiz ve fine-tune edilebilir WPOD alternatifi",
+            "how": "weights/iwpod_net.h5+json'u tek seferlik tf2onnx ile ONNX'e cevir (offline, Python; opset 13 hedefle). Decode kodu WPOD ile birebir ayni (reconstruct_new ayni affine+DLT matematigi) — steal #1 icin yazilan C# decode degismeden calisir. Orta vade: repo'daki TF2 egitim scripti + loss.py ile kendi fine-tune veri fabrikamizdan cikan TR plaka quad etiketleriyle (kose anotasyonu gerekir) sahaya ozel egit; 'fullimage' modu da destekliyor",
+            "value": "(1) GPLv3 suphesi tasiyan WPOD agirliklari yerine MIT — kurum icin temiz; (2) TITS 2021 iyilestirilmis egitim/mimari; (3) fine-tune yolu acik: gece/TR plaka kosullarina ozel rektifikatore giden tek gercekci yol (WPOD ONNX dondurulmus, IWPOD egitilebilir)",
+            "cost": "Donusum yarim gun (yalniz gelistirme makinesinde Python/TF gerekir, hedef PC'de degil); 7.5MB h5 -> benzer boyut ONNX, benzer CPU maliyeti beklenir (ayni aile, stride 16); fine-tune ise kose etiketli veri seti gerektirir (buyuk efor, ancak olcumle gerekce ciktiktan sonra)",
+            "source": "https://github.com/claudiojung/iwpod-net (src/keras_utils.py reconstruct_new, train_iwpodnet_tf2.py); agirliklar: https://raw.githubusercontent.com/claudiojung/iwpod-net/master/weights/iwpod_net.h5 + iwpod_net.json"
+          },
+          {
+            "technique": "WPOD'u ROI-sinirli dusuk-frekansli 'uzak plaka' gozlem dedektoru olarak denemek (dusuk oncelik)",
+            "how": "Tam kareye degil, ROI poligonunun bounding-box'ina, mevcut gozlem katmani butcesi icinde saniyede ~1 kez WPOD kostur (bound 256-416). Tam-konvolusyonel oldugu icin kucuk plakalari 384 YOLO'dan farkli olcek davranisiyla yakalayabilir; bulunan quad'i mevcut fuzzy track birlestirmeye aday gozlem olarak ver",
+            "value": "Sorun (a) uzak/kucuk plakalar icin ikinci, farkli-mimari sans: WPOD stride-16 yogun tahmin yapar ve kucuk plaka olceklerinde end2end YOLO'dan farkli hata profili verir; olcum bataryasinda 'uzak plaka ilk-tespit mesafesi' metrigiyle dogrudan test edilebilir",
+            "cost": "ROI 256x416 civari ~22ms arm64 / tahmini 70-150ms zayif Intel — ancak 1 Hz'de amorti; YOLO ile cakisan tespitler icin quad->bbox donusumu + mevcut track esleme yeniden kullanilir; implementasyon steal #1 ustune +yarim gun. Not: WPOD arac-kadraji dagitimiyla egitildi, tam sahne uzak plakada basarisiz olabilir — once olc, sonra tut/at",
+            "source": "lpd/infer_utils.py detect_lp_onnx (dinamik bound_dim mantigi) + tools/predict_lpd.py"
+          }
+        ],
+        "summary": "ort-alpr, WPOD-NET (plaka tespit+rektifikasyon) ve PaddleOCR'in ONNX'e cevrilmis CPU pipeline'i; repo MIT ama bakimsiz (~5 commit, 2022) ve asil deger 6.57MB'lik lpd.onnx ile decode matematiginde. Model IR 7 / opset 13, sadece Conv/Relu/MaxPool/Add/Softmax/Concat iceriyor — Microsoft.ML.OnnxRuntime 1.20 C# CPU'da dogrudan calisir, INT8'deki ConvInteger sorunumuz burada yok. Giris NHWC BGR float/255 ve dinamik boyutlu (16'nin kati), yani SkiaSharp BGRA baytlarindan CHW transpozu bile gerekmeden beslenir. Calisma mantigi: stride-16 hucre haritasinda olasilik + 2x3 affine regresyonu; affine kanonik kareye uygulanip 4 koseli quad cikarilir, quad'dan DLT ile tam homografi cozulup %10 kenar marjiyla warp edilir — yani bizim olcumde zarar veren binarizasyon-tabanli naif deskew'den tamamen farkli sinif: ogrenilmis kose tespiti + perspektif (sadece rotasyon degil) duzeltme. Gercek goruntude test ettim: agir egik plaka tam frontal rektifiye oldu ve kritik olarak, arac karesi yerine plaka bbox'inin 0.5-1.5x marjla genisletilmis KIRPINTISI verildiginde de prob~1.0 ile calisti — bizim 'yalniz dusuk guvenli/acili kirpintida ikinci gecis' senaryomuz dogrulandi. CPU maliyeti olctum: arm64 2-thread'de 160-208 bound kirpinti gecisi 9-17ms; zayif AVX'siz Intel'de 3-8x carpanla 30-80ms tahmini — track basina birkac cagriyla butce ici. C# entegrasyonu OpenCV gerektirmez: homografi 8x8 Gauss eliminasyonu (~40 satir), warp SkiaSharp SKMatrix perspektif alanlari veya 240x80 icin manuel bilinear inverse-map. Rektifiye kirpinti cct_xs_v2'ye verilip mevcut slot-vocab oylamasina EK gozlem olarak katilmali (degistirme degil) — boylece temiz plaka regresyon riski dusuk kalir; ayrica quad'dan bedavaya cikan egiklik/perspektif metrigi hem oy agirliklama hem tetik kapisi olarak kullanilabilir. PaddleOCR tarafi calintiya degmez: 48.8MB Cince DB dedektoru + 8.3MB genel CRNN, bizim sahaya fine-tune cct_xs_v2'ye karsi hem agir hem isabetsiz. Lisans notu: ort-alpr MIT dese de WPOD agirliklari GPLv3 alpr-unconstrained turevi (kurum ici kullanim sorun degil); daha temiz yol MIT lisansli IWPOD-NET (ayni yazarlar, TITS 2021) — decode birebir ayni, h5 agirliklari + TF2 egitim kodu mevcut, tek seferlik tf2onnx donusumu gerekir ve uzun vadede kendi verimizle fine-tune kapisi acik. Dikkat: rektifikasyon geometri duzeltir, bulaniklik (d) ve gece (c) sorunlarini dogrudan cozmez; tum kazanimlar kamera-referansli olcum bataryasinin acili alt-kumesinde exact-match deltasiyla dogrulanmali. Model linkleri dogrulandi ve kaydedildi (lpd.onnx yerel kopyasi scratchpad'de)."
+      },
+      {
+        "key": "openalpr-kby-codeproject",
+        "facts": [
+          "OpenALPR (github.com/openalpr/openalpr): AGPL-3.0 lisanslı, son push 2024-01, 521 açık issue ile fiilen bakımsız; post-processing katmanı OCR-agnostik — Tesseract'a bağımlı değil, slot×aday+skor girdisiyle çalışır (src/openalpr/postprocess/postprocess.cpp).",
+          "OpenALPR top-N üretimi: her karakter slotu için aday listesi tutulur (insertLetter: aynı harf tekrar görülürse occurrences++ ve totalscore+=score birikimi), sonra findAllPermutations priority_queue ile en-iyi-önce k-best arama yapar; çocuk permütasyon skoru delta ile güncellenir (childPermutation.first -= score[i][j]-score[i][j+1]), float skor set'i dedup hash olarak kullanılır, durdurma koşulu: allPossibilities>=topn VEYA consecutiveNonMatches>=topn*2.",
+          "OpenALPR SKIP_CHAR mekanizması (addLetter): skoru skip_level altında kalan her slot için '~' (silme/hayalet karakter) hipotezi adjustedScore=|skip_level-score|+min_confidence ile aday listesine eklenir; analyzePermutation SKIP içeren dizilimleri kısaltılmış plaka olarak üretir ve uzunluk sınırı (postProcessMinCharacters/MaxCharacters) + regex şablonuyla test eder.",
+          "OpenALPR pattern dosyası (runtime_data/postprocess/eu.patterns) sözdizimi: #=rakam, @=harf, ?=herhangi, [ABC]=küme; TR satırları: ##@####, ##@#####, ##@@###, ##@@####, ##@@@## — dikkat: 8 karakterli ##@@@### (2 rakam+3 harf+3 rakam) OpenALPR listesinde EKSİK, bizim TR-gramer setimiz daha eksiksiz. Eşleşme RE2 FullMatch ile tam-uzunluk kontrollü, bool döner (regexrule.cpp).",
+          "OpenALPR alpr_impl.cpp en-iyi aday seçimi: topNPlates listesinde şablonla eşleşen İLK aday, daha yüksek ham güvenli non-match adayın önüne geçirilir (isBestPlateSelected && matchesTemplate terfisi); her aday matches_template bayrağıyla birlikte olayda taşınır. Açık kaynak sürümde çoklu-kare 'seen plates' gruplaması YOK (ticari agent'ta), ama result_aggregator.cpp çoklu-geçiş sonuçlarını geometrik örtüşmeyle kümeler (merkez farkı < ort. yükseklik, alan farkı < 4x; string benzerliği KULLANILMAZ).",
+          "OpenALPR ResultAggregator MERGE_COMBINE somut skor reçetesi: aday_skoru = (confidence-60)*4 + şablon eşleşmesi bonusu +150 + top-N sırasına göre azalan pozisyon bonusu; küme üyelerinin top-N listeleri birleştirilip toplam skora göre sıralanır (MERGE_PICK_BEST alternatifi sadece en yüksek güveni alır).",
+          "kby-ai Automatic-License-Plate-Recognition-CSharp-.NET: lisans dosyası yok (tescilli), makine-başına lisans (kbyai_alpr_getMachineCode → satıcıya gönder → license.txt), modeller şifreli blob (model1.bin/model2.bin), 7 yıldız, push 2026-06 (aktif pazarlama reposu); README'de ülke listesi, doğruluk veya hız rakamı YOK — sadece WinForms demo + nesne API'si.",
+          "kby-ai API yüzeyi tek çağrı: kbyai_alpr_detection(IntPtr rgbData, int w, int h, ALPR_RESULT[], int count) → struct'ta plaka kutusu + ARAÇ kutusu (vl_x1..vl_y2) + float score + 64 karakterlik sabit string; çoklu plaka dizi ile destekleniyor; alt yapı DLL'leri ncnn.dll (Vulkan GPU opsiyonlu) + openvino.dll (Intel CPU hızlandırma) + opencv_world481.dll — ticari SDK'nın Intel CPU'da OpenVINO'ya yaslanması dikkat çekici.",
+          "CodeProject.AI-ALPR modülü: Python + PaddleOCR (det=en_PP-OCRv3, rec=en_PP-OCRv4, CRNN), lisans NOASSERTION (CodeProject'e özgü), son push 2025-05; varsayılanlar: PLATE_CONFIDENCE=0.7, AUTO_PLATE_ROTATE=False (varsayılan kapalı!), OCR_OPTIMAL_CHARACTER_HEIGHT=60px / WIDTH=36px, PLATE_RESCALE_FACTOR=1.0; GPU sadece CUDA ve 'Linux'ta GPU desteklenmiyor'; adaptörde çalışma-anı oturum yeniden kurma YOK — tüm donanım kapılaması init'te (compute capability + cuDNN versiyon eşikleri).",
+          "CodeProject.AI ALPR deskew varyantı (ALPR.py): açı tahmini min-area-rect'ten DEĞİL, OCR'ın tespit-only geçişindeki karakter kutu köşelerinden hesaplanan açıların ortalamasından; döndürme largest_rotated_rect() güvenlik kontrolü plaka kenarını kırpmayacaksa uygulanır; gamma-düzeltme+yeniden-OCR retry kodu var ama yorum satırında (denenmiş, kapatılmış).",
+          "CodeProject.AI-Server v2.6.5 ObjectDetectionYOLOv5Net (bizimle aynı stack: Microsoft.ML.OnnxRuntime + SkiaSharp): GetSessionOptions() OrtEnv.Instance().GetAvailableProviders() ile EP'leri probe eder, CUDA→OpenVINO(GPU_FP16)→DirectML sırasıyla her birini ayrı try/catch'te ekler, sona daima AppendExecutionProvider_CPU(); oturum kuruluşu exception atarsa CPU-only SessionOptions ile scorer YENİDEN kurulur ve InferenceDevice/InferenceLibrary alanları her yanıtta raporlanır; DirectML için EnableMemoryPattern=false + ORT_SEQUENTIAL zorunluluğu not edilmiş.",
+          "CodeProject YoloScorer.cs performans desenleri: ObjectPool<DenseTensor<float>> ile girdi tensörü havuzlama (kare başına GC basıncı sıfırlanır), RGB→CHW normalizasyonu Parallel.For(satır) + System.Numerics.Vector<uint> mask/shift/ConvertToSingle SİMD'iyle (Vector.IsHardwareAccelerated false ise skaler yola düşer — AVX'siz CPU'da da güvenli), inference lock(_inferenceSession) ile serileştirilir ve yorumda 'ölçekleme = model başına birden fazla InferenceSession' stratejisi önerilir."
+        ],
+        "steals": [
+          {
+            "technique": "SKIP_CHAR silme hipotezi (hayalet karakter adayı)",
+            "how": "TR-gramer kısıtlı çözümleyicimizde, biriktirilmiş slot×vocab dağılımında tepe olasılığı skip_level (ör. 0.60) altında kalan her slota 'karakter yok' adayı ekle; skoru OpenALPR formülüyle ver: |skip_level - p_top| (belirsizlik arttıkça silme hipotezi güçlenir). Gramer araması böylece aynı anda 7 ve 8 karakterli okumaları (##@@@## vs ##@@@##?) yarıştırır; 24ACB27_ vakasında sondaki hayalet hane silme hipoteziyle düşer çünkü 24ACB27 tam gramer eşleşmesi bonus alır.",
+            "value": "Sorun (b) açılı plakalarda son hane hatasını doğrudan hedefler: uç-slot belirsizliğini uzunluk-hipotezi olarak modelliyor, mevcut oylamamız sabit slot sayısına kilitliyken bu esneklik yeni. Kamera-referanslı bataryada 24ACB27 türü vakalarla A/B ölçülebilir.",
+            "cost": "Sıfıra yakın CPU (mevcut arama uzayına slot başına 1 aday eklenir); ~30-50 satır C#; risk yok çünkü yalnız düşük güvenli slotlarda devreye girer.",
+            "source": "https://raw.githubusercontent.com/openalpr/openalpr/master/src/openalpr/postprocess/postprocess.cpp (addLetter/analyzePermutation)"
+          },
+          {
+            "technique": "Priority-queue k-best aday üretimi (skor-delta çocuklar + erken durdurma)",
+            "how": "Slot×vocab dağılımından top-N plaka adayını OpenALPR'ın en-iyi-önce aramasıyla üret: kuyruğa en iyi dizilim konur, çocuk türetme tek slotun bir alt adayına inerek skor farkını düşerek yapılır (tam yeniden hesap yok), float-skor set'i ile dedup, 'topn*2 ardışık gramer-uyumsuz aday' görülünce erken durdur. Mevcut il+harf kombinasyon aramamızın önüne verimli enumeratör olarak konur.",
+            "value": "Ucuz ve sıralı top-N üretimi; gramer aramasını kör tarama yerine olasılık sırasına çevirir. (f) çift-emit çözümünün (aşağıdaki steal) altyapısı; ayrıca gece/bulanık karelerde doğru okumanın top-3'te yakalanma oranı yeni bir metrik olarak ölçülebilir.",
+            "cost": "Mikrosaniyeler düzeyinde CPU (heap işlemleri küçük); ~60-80 satır C#; mevcut resolver'a ekleme, mimari değişiklik yok.",
+            "source": "https://raw.githubusercontent.com/openalpr/openalpr/master/src/openalpr/postprocess/postprocess.cpp (findAllPermutations)"
+          },
+          {
+            "technique": "Top-N adayların olayda taşınması + matchesTemplate bayrağı + pattern-öncelikli terfi",
+            "how": "events.jsonl olayına topN: [{text, score, matchesTr}] alanı ekle (OpenALPR AlprPlateResult.topNPlates deseni). En-iyi seçimi: gramerle eşleşen ilk aday, ham güveni daha yüksek eşleşmeyen adayın önüne geçer. Çift-emit bastırma kuralı: yeni emit'in best'i, önceki emit'in top-N listesinde zaten varsa (veya tersi) bu YENİ olay değil güncellemedir — varyant zinciri tek olaya çöker; bariyer/whitelist karşılaştırması da best yerine top-N üzerinden yapılabilir.",
+            "value": "Sorun (f) çift-emit varyant zincirlerini olay-modeli düzeyinde çözer: emisyon kararı tek stringe değil aday kümesine bağlanır. Ölçüm: bataryada aynı araç için üretilen olay sayısı/varyant zinciri uzunluğu öncesi-sonrası.",
+            "cost": "CPU maliyeti sıfır (zaten hesaplanan adayların serileştirilmesi); olay şeması + emit mantığında ~yarım günlük iş; geçmiş events.jsonl ile geriye uyumlu (yeni alan).",
+            "source": "https://raw.githubusercontent.com/openalpr/openalpr/master/src/openalpr/alpr_impl.cpp"
+          },
+          {
+            "technique": "MERGE_COMBINE küme-skoru reçetesi (şablon bonuslu aday birleştirme)",
+            "how": "Fuzzy track birleştirmemiz iki track'i/emisyonu aynı araç saydığında, tarafların top-N listelerini OpenALPR ResultAggregator formülüyle birleştir: her aday için üye başına (conf-taban)*k + TR-gramer eşleşme bonusu (+150 dengi, yani güven farkını ezen büyüklükte) + top-N sıra bonusu topla, toplam skora göre tek kazanan seç. Karakter-düzeyi oylamamızın ÜSTÜNde string-düzeyi ikinci füzyon katmanı olur.",
+            "value": "Sorun (f)'nin track-birleşim ayağı: iki track farklı stringlerde karar kılmışsa bugün hangisinin emit edileceği belirsiz; bu reçete gramer-eşleşen adayı deterministik olarak kazandırır. Ayrıca gece (c) düşük güvenli okumalarda şablon bonusu doğru adayı öne çeker.",
+            "cost": "İhmal edilebilir CPU (birkaç düzine toplama/sıralama); ~40 satır C#; katsayılar (taban=60, bonus=150) bizim güven dağılımımıza göre bataryada kalibre edilmeli.",
+            "source": "https://raw.githubusercontent.com/openalpr/openalpr/master/src/openalpr/result_aggregator.cpp"
+          },
+          {
+            "technique": "Kapılı (gated) karakter-hizalı deskew + düşük-güven yeniden-OCR bütçesi",
+            "how": "Elenen naif min-area-rect deskew'in yeni varyantı (CodeProject.AI ALPR): (1) döndürme VARSAYILAN KAPALI, yalnız gramer-skoru eşik altı kalan kırpıntılarda dene; (2) açıyı plaka konturundan değil karakter kutularının üst-kenar açılarının ortalamasından al (bizde karakter kutusu yok → pratik karşılık: ±6-10 derecelik 2-3 sabit döndürme adayı dene, en yüksek gramer-skorlu çıktıyı tut); (3) largest_rotated_rect güvenlik kontrolü dengi olarak döndürmenin plakayı kırpmadığını doğrula. Mevcut gözlem katmanı bütçe desenimizle sınırla (kare başı en fazla 1 retry).",
+            "value": "Sorun (b) açılı plaka ve kısmen (d) bulanık kırpıntı: naif deskew'in temiz plakaya zarar vermesi sorunu kapılamayla ortadan kalkar — temiz plaka eşik üstü olduğundan hiç dokunulmaz. Ölçüm: açılı-plaka alt kümesinde exact-match, temiz kümede regresyon kontrolü.",
+            "cost": "Sınırlı: yalnız düşük güvenli kırpıntılarda +1-2 OCR geçişi (cct_xs_v2 CPU'da ~ms düzeyi) + SkiaSharp döndürme; bütçe mekanizmamız zaten var, ona bağlanır.",
+            "source": "https://raw.githubusercontent.com/codeproject/CodeProject.AI-ALPR/main/ALPR.py (auto_plate_rotate, largest_rotated_rect, yorumdaki gamma-retry)"
+          },
+          {
+            "technique": "Optimal karakter boyutu normalizasyonu (60px hedef yükseklik, anizotropik yüksek-kalite ölçekleme)",
+            "how": "CodeProject OCR_OPTIMIZATION deseni: OCR'a girmeden önce kırpıntıyı, tahmini karakter yüksekliği (plaka kutusu yüksekliğinin ~%60-70'i) hedef değere (onlar 60px) gelecek şekilde fx/fy AYRI faktörlerle INTER_CUBIC (SkiaSharp'ta SKSamplingOptions cubic/Mitchell) büyüt/küçült; böylece model kendi sabit girdisine küçültürken çift-örnekleme kaybı ve düşük kalite interpolasyon mush'ı engellenir. Optimal değerler cct_xs_v2 fine-tune setimizdeki karakter yüksekliği dağılımından çıkarılır.",
+            "value": "Sorun (a) uzak/küçük plaka ve (d) bulanık kırpıntı: küçük plakalarda karakterler modelin eğitildiği ölçeğe taşınır. Piksel-uzayı füzyonundan farklı: tek kare içi ölçek normalizasyonu, hizalama gerektirmez. Bataryada küçük-plaka alt kümesiyle A/B.",
+            "cost": "Kırpıntı başına tek ekstra resize (~0.1-0.5ms SkiaSharp CPU); ~20 satır; zayıf CPU'da ihmal edilebilir çünkü sadece tespit edilen plakalara uygulanır.",
+            "source": "https://raw.githubusercontent.com/codeproject/CodeProject.AI-ALPR/main/options.py (OCR_OPTIMAL_CHARACTER_HEIGHT=60/WIDTH=36) + ALPR.py resize_width_factor/fy"
+          },
+          {
+            "technique": "EP probe + try/catch zincirli oturum kurulumu + CPU'ya garantili geri dönüş + cihaz raporlama",
+            "how": "CodeProject ObjectDetector.cs deseni birebir C#'ımıza uyar: OrtEnv.Instance().GetAvailableProviders() ile mevcut EP'leri logla; hedef Intel PC'de Intel.ML.OnnxRuntime.OpenVINO paketiyle AppendExecutionProvider_OpenVINO(\"CPU_FP32\") dene (kby-ai ticari SDK'nın da Intel CPU'da openvino.dll taşıması bunun sektör deseni olduğunu gösteriyor); her EP ekleme ayrı try/catch, sona daima AppendExecutionProvider_CPU(); InferenceSession ctor'ı fırlatırsa plain-CPU SessionOptions ile OTOMATİK yeniden kur; seçilen InferenceDevice/Library'yi health endpoint'ine ve her events.jsonl kaydına yaz.",
+            "value": "Sorun (e): AVX durumu bilinmeyen zayıf Intel hedefte OpenVINO CPU EP tipik %1.5-3x konvolüsyon hızlanması verebilir (SSE4.2 yeter, AVX şart değil), fallback deseni sayesinde deneme riski sıfır — en kötü durumda bugünkü CPU yoluna döner. ConvInteger/INT8 fiyaskosunun aksine bu, FP32 grafiği değiştirmeden çalışır. Ölçüm: hedef PC'de mevcut benchmark bataryasıyla ms/kare.",
+            "cost": "1 NuGet paketi + ~40 satır oturum kurulum kodu; dağıtım boyutu +~100MB (OpenVINO runtime); çalışmazsa kendini kapattığı için operasyonel risk yok.",
+            "source": "https://github.com/codeproject/CodeProject.AI-Server (v2.6.5, src/modules/ObjectDetectionYOLOv5Net/ObjectDetector.cs GetSessionOptions)"
+          },
+          {
+            "technique": "DenseTensor havuzlama + Vector<T> SIMD piksel çıkarımı (SkiaSharp→CHW)",
+            "how": "YoloScorer.cs'ten doğrudan uyarlanabilir (aynı SkiaSharp+ORT stack): girdi tensörlerini ObjectPool'da tut (384×384×3 float = kare başına ~1.7MB allocation'ı sıfırlar, LOH/GC basıncı düşer); RGB→CHW normalize döngüsünü Parallel.For(satır) + System.Numerics.Vector<uint> mask/ShiftRightLogical/ConvertToSingle ile vektörleştir — Vector.IsHardwareAccelerated AVX'siz makinede SSE2'ye, o da yoksa skaler yola düşer, yani AVX-bilinmez hedefte güvenli. Örnek kod scratchpad'de: /private/tmp/claude-501/-Users-omer-Desktop-plakaokuma/31305ab5-eac8-415a-b32a-482461d37358/scratchpad/YoloScorer.cs satır 123-190.",
+            "value": "Sorun (e): zayıf CPU'da kare başı ön-işleme + GC duraklamaları fps bütçesinden çalar; eğer bizim piksel dönüşümümüz skaler per-pixel ise 3-5x ön-işleme hızlanması tipik. Ölçüm: mevcut kamera-referanslı bataryada ön-işleme ms'si ve GC sayısı (dotnet-counters) öncesi-sonrası.",
+            "cost": "~100 satır C# (kopyala-uyarla hazır); davranış değişikliği yok, sadece hız; tek risk BGRA/RGBA kanal sırası — PlatformColorShift sabitleri bunu zaten çözüyor.",
+            "source": "https://github.com/codeproject/CodeProject.AI-Server (v2.6.5, src/modules/ObjectDetectionYOLOv5Net/YOLOv5/YoloScorer.cs)"
+          }
+        ],
+        "summary": "Üç hedefi de kod düzeyinde okudum. OpenALPR'ın post-processing katmanı en değerli kaynak: slot başına aday listesi (occurrences + kümülatif skor birikimi), priority-queue tabanlı k-best permütasyon araması (çocuk adaylar skor-deltasıyla türetilir, float-skor hash'iyle dedup, topn*2 ardışık gramer-uyumsuzda erken durdurma) ve kritik SKIP_CHAR mekanizması — düşük güvenli slotlara |skip_level-p| skorlu 'karakter yok' hipotezi eklenip 7/8 karakterli okumalar yarıştırılıyor; bu bizim 24ACB27_ son-hane sorununa doğrudan uyan, sistemimizde olmayan bir desen. alpr_impl.cpp'de her olay matchesTemplate bayraklı top-N aday listesi taşıyor ve şablonla eşleşen İLK aday, daha yüksek ham güvenli eşleşmeyen adayın önüne terfi ediyor; result_aggregator.cpp ise çoklu geçiş sonuçlarını geometrik örtüşmeyle kümeleyip (conf-60)*4 + 150 şablon bonusu + sıra bonusu reçetesiyle birleştiriyor — bu ikili, çift-emit varyant zinciri sorunumuza olay-modeli çözümü veriyor. OpenALPR AGPL-3.0 ve fiilen bakımsız (son push 2024-01), yani kod alınmaz ama süreç mantığı serbestçe yeniden yazılır; TR pattern listesi bizimkinden eksik (##@@@### yok). kby-ai C# SDK'sı kapalı kutu: makine-başına lisans, şifreli model blob'ları, tek çağrılık kbyai_alpr_detection API'si plaka+araç kutusu+skor+64 karakter string döndürüyor; README'de ülke/doğruluk/hız iddiası yok — asıl sinyali DLL listesi: Intel CPU için openvino.dll + ncnn/Vulkan taşıması, ticari SDK'ların Intel CPU'da OpenVINO'ya yaslandığını kanıtlıyor. CodeProject.AI ALPR modülü Python+PaddleOCR ama iki aktarılabilir desen içeriyor: varsayılan-kapalı, karakter-kutusu-açılı ve largest_rotated_rect güvenlik kontrollü 'gated deskew' (bizim elenen naif min-area-rect'in ders alınmış varyantı) ve OCR öncesi karakterleri 60px optimal yüksekliğe anizotropik cubic ölçekleme (uzak/küçük plaka sorunumuza ucuz müdahale). Aynı sunucunun .NET ObjectDetectionYOLOv5Net modülü birebir bizim stack'imizde (OnnxRuntime+SkiaSharp) örnek ONNX oturum yöneticisi: GetAvailableProviders probe, EP'leri try/catch zinciriyle ekleme, ctor hatasında CPU-only yeniden kurma ve InferenceDevice'ın her yanıtta raporlanması; ayrıca DenseTensor havuzlama + Vector<T> SIMD piksel çıkarımı (AVX'siz CPU'da güvenli düşüşlü) zayıf hedef PC için ölçülebilir ön-işleme kazancı vaat ediyor. Önerdiğim sekiz steal'in tümü mevcut ölçüm bataryamızla A/B doğrulanabilir ve hiçbiri GPU ya da ağır CPU maliyeti gerektirmiyor."
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Repo-İnceleme"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "repo:alprnet",
+      "phaseIndex": 1,
+      "phaseTitle": "Repo-İnceleme",
+      "agentId": "a6c45a9748c8c0d86",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1783486178601,
+      "queuedAt": 1783486178594,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "AlprNet (github.com/Temppus/AlprNet) MIT lisanslı, tek günd…",
+      "promptPreview": "BİZİM SİSTEM (karşılaştırma tabanı — bunlarla kıyasla, zaten yaptıklarımızı \"yeni fikir\" diye önerme):\nC#/.NET8 + Microsoft.ML.OnnxRuntime 1.20 CPU + SkiaSharp (OpenCV YOK — arm64 sorunu nedeniyle bilinçli)\n+ ffmpeg RTSP. Modeller: yolo-v9-t-384 end2end tespit + fast-plate-ocr cct_xs_v2 (sahaya fine-tune edilmiş).\nZATEN VAR: çok-kare karakter oylaması (slot×vocab TAM olasılık dağılımı birikimi), T…",
+      "lastProgressAt": 1783486556288,
+      "tokens": 59911,
+      "toolCalls": 20,
+      "durationMs": 377687,
+      "resultPreview": "{\"summary\":\"AlprNet (github.com/Temppus/AlprNet) MIT lisanslı, tek günde (2025-10-26, 17 commit) yazılmış ve o günden beri (8.5+ ay) hiç commit almamış, 0 yıldız / 0 fork / 0 issue, NuGet'e yayınlanmamış \\\"WIP\\\" bir kütüphane; toplam ~550 satır C# koddan ibaret. Pipeline'ı bizimkinin fakir bir alt kümesi: tek-görüntü tespit (yolo-v9 end2end, [N,7] çıktı parse, 0.25 eşik, letterbox-114) + tek aşama…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "repo:fast-plate-ocr-ekosistemi",
+      "phaseIndex": 1,
+      "phaseTitle": "Repo-İnceleme",
+      "agentId": "aecf72f6c004d0616",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1783486178602,
+      "queuedAt": 1783486178594,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Üç repo da (fast-alpr 0.4.0, fast-plate-ocr 1.1.0, open-ima…",
+      "promptPreview": "BİZİM SİSTEM (karşılaştırma tabanı — bunlarla kıyasla, zaten yaptıklarımızı \"yeni fikir\" diye önerme):\nC#/.NET8 + Microsoft.ML.OnnxRuntime 1.20 CPU + SkiaSharp (OpenCV YOK — arm64 sorunu nedeniyle bilinçli)\n+ ffmpeg RTSP. Modeller: yolo-v9-t-384 end2end tespit + fast-plate-ocr cct_xs_v2 (sahaya fine-tune edilmiş).\nZATEN VAR: çok-kare karakter oylaması (slot×vocab TAM olasılık dağılımı birikimi), T…",
+      "lastProgressAt": 1783486691043,
+      "tokens": 89876,
+      "toolCalls": 37,
+      "durationMs": 512441,
+      "resultPreview": "{\"facts\":[\"Lisans/bakım: üç repo da MIT; fast-plate-ocr v1.1.0 (13 Mart 2026, 11 release), fast-alpr v0.4.0 (Mart 2026), open-image-models v0.5.1 (Eylül 2025) — hepsi aktif bakımda.\",\"Model zoo GÜNCEL DURUM: cct-xs-v2 / cct-s-v2'den SONRA yeni OCR modeli YOK (hub: v2, v1, relu-v1, eski MobileViTV2 ve Arjantin CNN modelleri). Kullandığımız cct_xs_v2 hâlâ en güncel XS model.\",\"cct_xs_v2 mimari (mode…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "repo:ort-alpr-wpod",
+      "phaseIndex": 1,
+      "phaseTitle": "Repo-İnceleme",
+      "agentId": "a28bb8b1c50cee458",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1783486178602,
+      "queuedAt": 1783486178594,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "ort-alpr, WPOD-NET (plaka tespit+rektifikasyon) ve PaddleOC…",
+      "promptPreview": "BİZİM SİSTEM (karşılaştırma tabanı — bunlarla kıyasla, zaten yaptıklarımızı \"yeni fikir\" diye önerme):\nC#/.NET8 + Microsoft.ML.OnnxRuntime 1.20 CPU + SkiaSharp (OpenCV YOK — arm64 sorunu nedeniyle bilinçli)\n+ ffmpeg RTSP. Modeller: yolo-v9-t-384 end2end tespit + fast-plate-ocr cct_xs_v2 (sahaya fine-tune edilmiş).\nZATEN VAR: çok-kare karakter oylaması (slot×vocab TAM olasılık dağılımı birikimi), T…",
+      "lastProgressAt": 1783486761044,
+      "tokens": 65198,
+      "toolCalls": 37,
+      "durationMs": 582442,
+      "resultPreview": "{\"facts\":[\"ort-alpr (tharakarehan) lisansı MIT; ancak WPOD-NET agirliklari GPLv3 lisansli sergiomsilva/alpr-unconstrained projesinden donusturulmus (belediye ici kullanim = dagitim yok = GPL yukumlulugu tetiklenmez)\",\"ort-alpr bakimsiz: ~5 commit, son aktivite ~2022; deger kodda degil model dosyalarinda ve decode matematiginde\",\"WPOD ONNX modeli: https://github.com/tharakarehan/ort-alpr/raw/master…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "repo:openalpr-kby-codeproject",
+      "phaseIndex": 1,
+      "phaseTitle": "Repo-İnceleme",
+      "agentId": "a61c40ceb18eaee8d",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1783486178602,
+      "queuedAt": 1783486178594,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Üç hedefi de kod düzeyinde okudum. OpenALPR'ın post-process…",
+      "promptPreview": "BİZİM SİSTEM (karşılaştırma tabanı — bunlarla kıyasla, zaten yaptıklarımızı \"yeni fikir\" diye önerme):\nC#/.NET8 + Microsoft.ML.OnnxRuntime 1.20 CPU + SkiaSharp (OpenCV YOK — arm64 sorunu nedeniyle bilinçli)\n+ ffmpeg RTSP. Modeller: yolo-v9-t-384 end2end tespit + fast-plate-ocr cct_xs_v2 (sahaya fine-tune edilmiş).\nZATEN VAR: çok-kare karakter oylaması (slot×vocab TAM olasılık dağılımı birikimi), T…",
+      "lastProgressAt": 1783486826645,
+      "tokens": 58259,
+      "toolCalls": 32,
+      "durationMs": 648043,
+      "resultPreview": "{\"facts\":[\"OpenALPR (github.com/openalpr/openalpr): AGPL-3.0 lisanslı, son push 2024-01, 521 açık issue ile fiilen bakımsız; post-processing katmanı OCR-agnostik — Tesseract'a bağımlı değil, slot×aday+skor girdisiyle çalışır (src/openalpr/postprocess/postprocess.cpp).\",\"OpenALPR top-N üretimi: her karakter slotu için aday listesi tutulur (insertLetter: aynı harf tekrar görülürse occurrences++ ve t…"
+    }
+  ],
+  "totalTokens": 273244,
+  "totalToolCalls": 126
+}
