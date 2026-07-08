@@ -265,10 +265,17 @@ public sealed class CameraWorker : IAsyncDisposable
             using var data = img.Encode(SKEncodedImageFormat.Jpeg, 85);
             File.WriteAllBytes(Path.Combine(dir, name), data.ToArray());
 
-            // FIFO disk sınırı: her 100 kayıtta bir en eskileri buda.
+            // Disk sınırı: her 100 kayıtta bir — (a) KVKK saklama süresi dolanlar, (b) adet fazlası budanır.
             if (_evidenceCount < 0 || ++_evidenceCount % 100 == 0)
             {
                 var files = new DirectoryInfo(dir).GetFiles("*.jpg");
+                if (_options.EvidenceRetentionDays > 0)
+                {
+                    var cutoff = DateTime.UtcNow.AddDays(-_options.EvidenceRetentionDays);
+                    foreach (var f in files.Where(f => f.LastWriteTimeUtc < cutoff))
+                        try { f.Delete(); _logger.LogInformation("kanıt saklama süresi doldu, silindi: {File}", f.Name); } catch { /* yoksay */ }
+                    files = new DirectoryInfo(dir).GetFiles("*.jpg");
+                }
                 _evidenceCount = files.Length;
                 int excess = files.Length - Math.Max(100, _options.EvidenceMaxFiles);
                 if (excess > 0)
@@ -350,6 +357,7 @@ public sealed class CameraWorker : IAsyncDisposable
             Box = best.Box,
             Scope = scope,
             EvidencePath = evidence,
+            LowConfidence = best.OcrConfidence < _options.ManualReviewMinOcr,
         };
 
         EventsEmitted++;

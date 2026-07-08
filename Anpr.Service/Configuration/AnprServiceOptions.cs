@@ -145,6 +145,30 @@ public sealed class AnprServiceOptions
     /// <summary>evidence/ klasöründe tutulacak azami dosya sayısı (aşınca en eskiler silinir).</summary>
     public int EvidenceMaxFiles { get; set; } = 3000;
 
+    /// <summary>
+    /// KVKK saklama süresi: bu günden eski kanıt kırpıntıları otomatik silinir (kamu pratiği 30-45 gün;
+    /// bağlayıcı süreyi hukuk birimi belirler). 0 = süre sınırı yok (yalnız adet sınırı çalışır).
+    /// </summary>
+    public int EvidenceRetentionDays { get; set; } = 30;
+
+    /// <summary>
+    /// Loglarda plaka maskeleme (KVKK): true ise "25ABC123" -> "25***123" yazılır. Geliştirme/gölge
+    /// çalışma döneminde karşılaştırma için false; canlı işletmede hukuk birimi kararına göre açılır.
+    /// </summary>
+    public bool MaskPlatesInLogs { get; set; } = false;
+
+    /// <summary>
+    /// Operatör-onayı eşiği: uzlaşı OCR güveni bu değerin altındaki olaylar LowConfidence=true
+    /// bayrağıyla yayınlanır (otopark yazılımı bariyeri otomatik açmak yerine operatöre düşürebilir).
+    /// </summary>
+    public float ManualReviewMinOcr { get; set; } = 0.75f;
+
+    /// <summary>Dolu ise açılışta tespit modelinin SHA-256'sı doğrulanır; uyuşmazsa servis BAŞLAMAZ (bozuk/yanlış model koruması).</summary>
+    public string? DetectorModelSha256 { get; set; }
+
+    /// <summary>Dolu ise açılışta OCR modelinin SHA-256'sı doğrulanır; uyuşmazsa servis BAŞLAMAZ.</summary>
+    public string? OcrModelSha256 { get; set; }
+
     public int HttpPort { get; set; } = 8080;
 
     /// <summary>HTTP dinleme adresi. 0.0.0.0 = tüm arayüzler (LAN'daki web app erişebilsin).</summary>

@@ -54,6 +54,10 @@ public sealed partial class AnprCameraSupervisor : IHostedService
         _logger.LogInformation("ANPR başlıyor | dedektör={Det} | ocr={Ocr} | threads={Threads} | kameralar={Count}",
             Path.GetFileName(detector), Path.GetFileName(ocr), _options.OnnxIntraOpThreads, _options.Cameras.Count);
 
+        // Model bütünlük kontrolü (yapılandırılmışsa): bozuk/yanlış sürüm modelle sessizce çalışmayı önler.
+        VerifyModelHash(detector, _options.DetectorModelSha256, "dedektör");
+        VerifyModelHash(ocr, _options.OcrModelSha256, "ocr");
+
         if (_options.Cameras.Count == 0)
             _logger.LogWarning("Yapılandırmada kamera yok (Anpr:Cameras boş).");
 
@@ -126,6 +130,21 @@ public sealed partial class AnprCameraSupervisor : IHostedService
     }
 
     // Göreli yolları uygulama çıktı dizinine (models/ buraya kopyalanır) ya da çalışma dizinine göre çöz.
+    // Yapılandırmada hash verilmişse dosyanın SHA-256'sını doğrular; uyuşmazlıkta servis BAŞLATILMAZ
+    // (R-16: bozuk indirme / yanlış sürümle sessiz çalışma, yanlış okumalardan daha tehlikelidir).
+    private void VerifyModelHash(string path, string? expectedSha256, string label)
+    {
+        if (string.IsNullOrWhiteSpace(expectedSha256)) return;
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        using var fs = File.OpenRead(path);
+        string actual = Convert.ToHexString(sha.ComputeHash(fs));
+        if (!actual.Equals(expectedSha256.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"{label} modeli SHA-256 uyuşmuyor: beklenen={expectedSha256}, dosya={actual} ({path}). " +
+                "Model dosyası bozuk veya yanlış sürüm — servis başlatılmadı.");
+        _logger.LogInformation("{Label} modeli SHA-256 doğrulandı", label);
+    }
+
     private static string ResolveModelPath(string path)
     {
         if (Path.IsPathRooted(path) && File.Exists(path)) return path;

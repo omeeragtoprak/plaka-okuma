@@ -33,4 +33,13 @@ public sealed record PlateEvent
 
     /// <summary>Kanıt kırpıntısının servis-köküne göre yolu (ör. "evidence/xxx.jpg"). Yoksa null.</summary>
     public string? EvidencePath { get; init; }
+
+    /// <summary>Tekil olay kimliği — webhook/PMS tarafında idempotent işleme ve düzeltme geri-bildirimi için.</summary>
+    public Guid EventId { get; init; } = Guid.NewGuid();
+
+    /// <summary>
+    /// Uzlaşı güveni ManualReviewMinOcr eşiğinin altında: otopark yazılımı bariyeri otomatik açmak
+    /// yerine operatör onayına düşürmelidir (kirli/karlı/bulanık plaka akışı).
+    /// </summary>
+    public bool LowConfidence { get; init; }
 }
