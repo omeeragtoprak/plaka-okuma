@@ -298,3 +298,25 @@ son 30 sn'de müdavim emit'i varken, müdavim-olmayan lev≤2 varyant güven<0.9
 bile her dilimde kayıp (karanlık 99→97, temiz 341→334; toplam +1/−13). Sahaya fine-tune'lu OCR
 pozlamaya zaten dayanıklı; ön-işleme gürültü büyütüp oy havuzunu kirletiyor. Gece yolu = VERİ
 (gece kırpıntısı hasadı + re-tune), ön-işleme değil.
+
+## 5j. Güncelleme (2026-07-11 devam): Faz 4 FSRCNN SR CANLIDA + derin araştırma + proje skill'leri
+
+**Derin araştırma (3 ajan; ham bulgular docs/research/2026-07-11-...):** (1) SR literatürü: metin-SR
+(TSRN/TBSRN) CPU bütçesini 3-8× aşar; plaka-özel LCDNet deformable-conv (opset 22+) nedeniyle port
+edilemez AMA UFPR-SR-Plates (100k LR-HR çifti, CC BY 4.0) ve LCOFL (OCR-loss'lu SR eğitimi, +4-11p)
+gelecek için not edildi; TextZoom+ICPR 2026 kanıtı: LR-dayanıklı OCR eğitimi ≈ SR, ikisi+oylama en iyi.
+(2) Gece: Faz-3 elememiz literatürle doğrulandı (arXiv 2410.13622: CLAHE/gri/bilateral ÜÇÜ de plaka
+doğruluğunu düşürdü; 2409.14461: LLIE tanımaya yaramıyor). (3) Skill ekosistemi: ONNX/ANPR skill'i YOK
+→ kendi skill'lerimiz yazıldı: `.claude/skills/anpr-regression` (batarya + referans enjeksiyonu +
+bench-history) ve `.claude/skills/onnx-safety-gate` (ConvInteger/IR/opset avı + çıktı-eşitliği;
+onnxoptimizer OODTE tehlikesi belgelendi: tespit modellerinde %16.6 sapma, YOLO −14.31 mAP).
+
+**Faz 4 — FSRCNN ×2 SR KAPIYI GEÇTİ, CANLIDA:** Saafke FSRCNN_x2.pb → tf2onnx (opset 17, IR8,
+yalnız Conv/Relu/DepthToSpace; ConvInteger YOK; dinamik boyut) → **0.8 ms/çağrı**. Offline vote-merge
+A/B: **küçük dilim 28→30/41 (+2/−0)**; üretim tetiği genişlik<100px olduğundan diğer dilimler
+etkilenmez (n=41 küçük — canlı doğrulama sürüyor). C#: `PlateSuperResolver` (Y-kanalı ağ + CrCb
+bilinear, cv2 BT.601 birebir); CropEnhancer Aşama-4; `EnhanceSr=true, SrMaxWidthPx=100`.
+
+**cct_xs_v4 denemesi (arka planda):** ICPR-reçeteli ODAKLI LR-degradation augmentation
+(Downscale 0.25-0.7 p=0.5 + blur/noise/JPEG agresif, geometri minimal — v3'ün karışık reçetesinden
+farklı). Sonuç ölçülünce karar verilecek (v3 dersi: beklenti temkinli).

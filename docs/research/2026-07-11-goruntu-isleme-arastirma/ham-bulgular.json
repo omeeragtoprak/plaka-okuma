@@ -1,0 +1,257 @@
+{
+  "summary": "SR + gece iyileştirme + plaka-özel görüntü işleme literatür/repo taraması + agent-skill keşfi",
+  "agentCount": 3,
+  "logs": [
+    "3/3 araştırma bitti"
+  ],
+  "result": {
+    "research": [
+      {
+        "key": "super-cozunurluk",
+        "summary": "Plaka SR araştırması dört koldan doğrulandı ve en kritik bulgu şu: literatürdeki en güncel kanıtlar (TextZoom Table 2 ve ICPR 2026 LRLPR yarışması) SR ile LR-dayanıklı OCR eğitiminin başa baş olduğunu, kombinasyonun ve çok-kare oylamanın asıl kazancı verdiğini gösteriyor. TextZoom'da ASTER'ı LR görüntülerle fine-tune etmek (%59.3), TSRN süper çözünürlük + hazır ASTER'dan (%58.3) daha iyi çıktı; ICPR 2026'da 3. olan takım (%80.17) hiç SR kullanmadan LR-dayanıklı OCR ile 1.'ye (%82.13, HAT+MambaIRv2 SR) 2 puan yaklaştı ve 2. takım HR karelerini sentetik degrade (blur+noise+JPEG+downscale) ederek eğitim yaptı. Bu, elimizdeki cct_xs fine-tune hattına degradation augmentation eklemenin sıfır çalışma-zamanı maliyetiyle en yüksek ROI olduğunu kanıtlıyor. Plaka-özel SR tarafında Nascimento/Laroca ekosistemi (PLNET 2023, LCDNet 2024, UFPR-SR-Plates 2025) tam bizim senaryomuzda (16×48→32×96) çalışıyor: LCDNet gerçek LR'da tanımayı %2.2→%29.9'a, 5-kare MVCP oylamasıyla %42.3'e çıkarıyor ve OCR-güdümlü LCOFL loss'un tek başına ~4 puan kattığı ablationla gösterilmiş. Ancak LCDNet doğrudan alınamaz: deformable conv ORT'de opset 22+ istiyor (kuralımız ≤17) ve GPU'da bile ~570ms/görüntü. TSRN/TBSRN metin-SR modelleri de 2.8M+ param ve LSTM/transformer içerdiğinden 40ms CPU bütçesini aşar. Buna karşılık ESPCN sınıfı mimari mükemmel uyuyor: ONNX Model Zoo'nun hazır sub-pixel CNN'ini (234KB, opset 10, sadece Conv/Relu/Reshape/Transpose — ConvInteger yok) indirip bu makinede ölçtüm: 2 thread'de 224×224 için 53ms, bizim 32×96 kırpıntı ölçeğinde ~3-4ms; DepthToSpace da ORT CPU'da opset 13+ tam destekli. Önerilen yol: (1) hemen cct_xs_v4'ü agresif LR-degradation augmentation ile fine-tune et; (2) paralelde ~25K paramlık mini-ESPCN x2'yi kendi OCR'ımızın loss'uyla (LCOFL-lite) plaka verisinde eğitip ONNX'e al, sadece <100px genişlik kırpıntılarda tetikle ve SR'lı+SR'sız geçişleri mevcut slot×vocab oylamasına kat; (3) eğitim verisi için CC BY 4.0 lisanslı 100k görüntülük UFPR-SR-Plates'i indir ve kendi track'lerimizden uzak-kare(LR)/yakın-kare(HR) çiftleri üret. Real-ESRGAN/SR3/diffusion tabanlı her şeyden kaçınılmalı: hem yavaşlar hem UFPR benchmark'ında plaka-özel modellerden belirgin kötüler (%20.2 vs %29.9). Bu plan gece %84→%90+ hedefi için iki bağımsız kazanç kanalı (dayanıklı OCR + ucuz SR ikinci-geçişi) açıyor ve ikisi de ≤40ms bütçeye rahat sığıyor.",
+        "findings": [
+          {
+            "item": "Hazır ESPCN ONNX modeli — ONNX Model Zoo super-resolution-10 (bizzat indirilip test edildi)",
+            "detail": "Link: https://huggingface.co/onnxmodelzoo/super-resolution-10/resolve/main/super-resolution-10.onnx — 234KB, opset 10, op listesi (bizzat inceledim): Conv×4, Relu×3, Reshape×2, Transpose×1 (pixel-shuffle Reshape+Transpose olarak gömülü, DepthToSpace bile gerekmiyor); ConvInteger YOK. Girdi 1×1×224×224 (Y-kanalı, SABİT boyut), çıktı 672×672 (x3). Bu Mac'te ölçtüm: 53.4ms @224×224 (2 thread) → 32×96 plaka kırpıntısı ölçeğinde ~3-4ms. Not: DepthToSpace ORT CPU'da opset 13+ float için tam destekli (OperatorKernels.md'den doğruladım); DeformConv ise ancak opset 22+ (kuralımız ≤17'ye aykırı). Alternatif hazır ağırlıklar: Saafke/FSRCNN_Tensorflow FSRCNN_x2.pb (~40KB, 12K param, tf2onnx ile çevrim gerekir), Ambarella/FSRCNN (HF, x4).",
+            "actionable": "Prototip A/B testi için hemen kullanılabilir: 224 sabit giriş yüzünden ya kırpıntıyı pad'leyip beslersiniz ya da (daha temiz) aynı 4-conv mimariyi PyTorch'ta 10 satırla x2 olarak yeniden export edersiniz (nn.PixelShuffle → opset 13-17'de DepthToSpace'e çevrilir, ORT 1.23 C# CPU'da sorunsuz). Beklenen ek maliyet kırpıntı başına ~3-5ms — 40ms bütçenin %10'u. SkiaSharp bikübik büyütme yerine SR ile 64×128'e büyütüp mevcut OCR'a beslenir.",
+            "source": "https://huggingface.co/onnxmodelzoo/super-resolution-10 + yerel ölçüm (onnxruntime 1.27, 2 thread) + https://raw.githubusercontent.com/microsoft/onnxruntime/main/docs/OperatorKernels.md"
+          },
+          {
+            "item": "Metin-özel SR (TSRN/TBSRN/TextZoom) CPU'da GERÇEKÇİ DEĞİL — ama kazanç rakamları SR'ın değerini kanıtlıyor",
+            "detail": "TSRN (ECCV 2020, arxiv 2005.03341): 2.8M param, 5× Sequential Residual Block (her biri çift yönlü LSTM içerir) + STN hizalama — ONNX'e çevrilebilir ama LSTM'li 2.8M param CPU'da tahminen 100-300ms (yayınlanmış tüm hızlar GPU: GTX1080Ti batch50). TBSRN (CVPR 2021) transformer tabanlı, daha ağır. OCR kazancı gerçek: ASTER ile bicubic→TSRN easy %64.7→%75.1 (+10.4), medium +13.9, hard +8.9; CRNN ile +16.1 puan. ESTISR (2023) bile sadece %35 hızlanma veriyor — hâlâ bütçe dışı.",
+            "actionable": "Bu modelleri KULLANMAYIN (40ms bütçeyi 3-8× aşar, scene-text için eğitilmiş, plaka fontuna uyumsuz). Ama mimari dersi alın: SR'ı OCR loss'uyla eğitmek (bizim cct_xs'in logitlerini loss'a katmak) kazancın ana kaynağı. Bu fikri mini-ESPCN'e taşıyın.",
+            "source": "https://ar5iv.labs.arxiv.org/html/2005.03341 (TextZoom/TSRN paper, Table 4-6)"
+          },
+          {
+            "item": "Plaka-özel SR literatürü 2022-2026: LCDNet + UFPR-SR-Plates benchmark — tam bizim senaryo (16×48→32×96), kanıtlı kazanç, ama doğrudan port edilemez",
+            "detail": "LCDNet (SIBGRAPI 2024, arxiv 2408.15103, kod: github.com/valfride/lpsr-lacd): PixelShuffle + paylaşımlı-ağırlıklı attention (PLTFAM) + deformable conv + LCOFL loss (OCR-güdümlü karakter/layout focal loss) + OCR-discriminator'lı GAN eğitimi. RodoSol sentetik LR: tanıma %1.1→%49.8 (PLNET %39.0, SR3 diffusion %43.1 ama 52× yavaş); gerçek dünya LR: %9.9→%39.5. Ablation: LCOFL tek başına +3.9 puan. UFPR-SR-Plates (2025, arxiv 2505.06393): 100k görüntü/10k track (5 gerçek-LR 16×48 + 5 HR 32×96), CC BY 4.0 lisans, indirme: valfride.github.io/nascimento2025toward. Benchmark: LR %2.2 → Real-ESRGAN %20.2, LPSRGAN %19.6, PLNET %29.9, LCDNet %29.9; 5-görüntü MVCP oylamasıyla LCDNet %42.3. ENGELLER: LCDNet'in deformable conv'u ORT'de opset 22+ ister (kural: ≤17), GPU'da bile ~570ms/görüntü (4k görüntü 38dk); PLNET checkpoint 1.9GB; her iki repoda LICENSE dosyası YOK (varsayılan telif — ticari kullanım için izin sorulmalı).",
+            "actionable": "Modelleri port etmeyin; üç şeyi alın: (1) UFPR-SR-Plates'i (CC BY 4.0) mini-ESPCN ön-eğitim verisi olarak indirin — 100k gerçek LR-HR çifti hazır; (2) LCOFL-lite: SR eğitiminde L1+SSIM'e kendi cct_xs OCR'ımızın CE loss'unu ekleyin (ablation +4-11 puan gösteriyor); (3) MVCP füzyon bulgusu (%29.9→%42.3) mevcut slot×vocab oylamamızı doğruluyor — SR'lı ve SR'sız OCR geçişlerini AYNI oylamaya katın, tek geçişi değiştirmeyin.",
+            "source": "https://arxiv.org/pdf/2408.15103 (PDF'i okudum) + https://arxiv.org/html/2505.06393v1 + https://github.com/valfride/lpr-rsr-ext/releases (asset boyutları API'den doğrulandı)"
+          },
+          {
+            "item": "SR mi, LR-dayanıklı OCR eğitimi mi? Kanıt: sabit-domain senaryoda fine-tune en az SR kadar iyi ve bedava — ikisi birlikte en iyisi",
+            "detail": "İki bağımsız kanıt: (1) TextZoom Table 2: ASTER'ı LR verisiyle fine-tune %59.3 > TSRN-SR + hazır ASTER %58.3; LR'a uygun girdi boyutuyla yeniden eğitim bile %47.2→%52.6. Fine-tune'un tek dezavantajı genel veride gerileme — bizim sabit otopark kamerası domain'inde bu dezavantaj yok. (2) ICPR 2026 LRLPR yarışması (arxiv 2604.22506): 1. DLmath %82.13 (HAT+MambaIRv2 SR — CPU'da imkansız ağırlıkta), 3. OpenOCR %80.17 SR'SIZ doğrudan LR-robust OCR; 2. takım %81.73 HR'ları sentetik degrade ederek (blur+noise+JPEG+downscale) eğitti. Yarışma raporu sonucu: SR vs robust-OCR arasında net kazanan yok; en tutarlı kazanç 5-kare temporal yapıyı kullanmak.",
+            "actionable": "EN YÜKSEK ROI aksiyonu: mevcut fine-tune hattıyla (trained_v3) cct_xs_v4'ü LR-degradation augmentation ile eğitin — her HR kırpıntıya rastgele: genişliği 32-64px'e düşür→64×128'e geri büyüt (bikübik), gaussian noise (gece ISO gürültüsü), hafif motion blur, JPEG artefaktı. Çalışma zamanı maliyeti 0ms, gece %84 ve <100px hedeflerinin ikisine birden vurur. SR ikinci-geçişi bununla rekabet etmez, üstüne eklenir (oylamada iki farklı görüş = TextZoom+ICPR bulgusuna göre en iyi kombinasyon).",
+            "source": "https://ar5iv.labs.arxiv.org/html/2005.03341 (Table 2) + https://arxiv.org/html/2604.22506 + https://icpr26lrlpr.github.io/"
+          },
+          {
+            "item": "Önerilen uygulama planı: 3 aksiyon, öncelik sırasıyla",
+            "detail": "A1 (1-2 gün, risk yok): cct_xs_v4 = v3 fine-tune + degradation augmentation (yukarıdaki reçete). A2 (3-5 gün): mini-ESPCN x2 eğit — 4 conv (64/64/32/4×r² filtre, ~25K param, ~100KB ONNX, opset 17, Conv+Relu+DepthToSpace), giriş 32×96 RGB veya Y-kanalı, loss = L1 + λ·CE(cct_xs logits); veri = UFPR-SR-Plates ön-eğitim + kendi track'lerimizden uzak-kare/yakın-kare çiftleri; C# entegrasyonu: genişlik<100px ise SR uygula → iki OCR geçişi → mevcut dağılım oylamasına kat (~4-8ms ek). A3 (yarım gün, A2'den önce hızlı sinyal): sr10.onnx ile kirli A/B — gece başarısız kırpıntı setinde Y-kanal SR'ın exact-match'e etkisini ölç; kazanç ≥2 puansa A2'ye yatırım kesinleşir. KAÇINILACAKLAR: TSRN/TBSRN (LSTM/transformer, bütçe 3-8× aşımı), LCDNet portu (DeformConv opset22+, ORT-CPU kuralına aykırı), Real-ESRGAN (16.7M param; UFPR'de plaka-özel modellerden 10 puan geride), diffusion/SR3 (52× yavaş).",
+            "actionable": "A1 hemen başlatılabilir (mevcut hat + augmentation koduna ~50 satır). A2 için indirmeler hazır: UFPR-SR-Plates (CC BY 4.0, valfride.github.io/nascimento2025toward), referans mimari kod github.com/valfride/lpsr-lacd (lisanssız — sadece fikir alın, kod kopyalamayın). Beklenen toplam kazanç: gece exact %84→%89-92 (TextZoom +9-14 puan hard-subset ve UFPR füzyon +12 puan verilerinden ekstrapolasyon), <100px plakalarda daha yüksek görece kazanç.",
+            "source": "Sentez: yerel ONNX ölçümleri + UFPR-SR-Plates/LCDNet/TextZoom/ICPR-2026 rakamları (yukarıdaki kaynaklar)"
+          }
+        ]
+      },
+      {
+        "key": "gece-iyilestirme",
+        "summary": "Gece iyileştirme araştırmasının ana sonucu: literatür 'körlemesine ön-işleme' aleyhine, 'tetik-kapılı + oylamayla sigortalı ön-işleme' ve 'karanlık augmentasyonla fine-tune' lehine. Karşı-soru (4) doğrulandı: Brezilya plaka çalışmasında (arXiv 2410.13622) CLAHE/gri/bilateral ÜÇÜ DE doğruluğu düşürdü (71.7%→70.75%) ve genel ampirik çalışma (arXiv 2409.14461) LLIE'nin tanıma görevlerine etkisini 'marjinal veya negatif' buldu; ancak bu robustluk augmentasyona bağlıdır ve bizim cct_xs modelimizin kökeni fast-plate-ocr'ın varsayılan augmentasyonu ÇOK dar (parlaklık ±0.1, gamma 95-105) — yani global model gerçek geceye karşı eğitilmemiş. Sizin trained_v3 fine-tune'unuz (2026-07-10) augmentasyonu zaten genişletmiş (brightness −0.4..+0.15, gamma 60-140, ISONoise); bu, kalan gece hatalarının muhtemelen bu dağılımın da DIŞINDA kalan çok karanlık/çok düşük kontrastlı kırpıntılar olduğu anlamına gelir. Plaka-özel POZİTİF kanıt da var: URetinex-Net+TRBA gece doğruluğunu +5.11 puan artırdı (75→80.11%), ama ağır modelle; CLAHE+USM ise TESPİT tarafında kazandırdı (mAP 0.830) — tespit ve OCR ayrımı kritik, sizin metrik kırpıntı-exact olduğundan sorun OCR tarafında. Önerilen sıralı plan: (1) CropQualityScorer'a P2/P98 persentil ekleyip TETİK tanımla (MeanGray<60 VEYA DarkPct>0.35 VEYA P98−P2<80); (2) yalnız tetiklenen kırpıntıya ~0.2ms'lik robust persentil germe (P2→0, P98→255 LUT) uygula — OCR girdisi ham uint8 olduğundan bu, kırpıntıyı eğitim dağılımına 'normalize etme' işlemidir, estetik iyileştirme değil; (3) sigorta olarak karanlık kırpıntıda ÇİFT OKUMA yap (ham + germe) ve iki slot×vocab dağılımını mevcut oylamada birleştir — literatürdeki 'ön-işleme zarar verebilir' riskini oylama nötralize eder, maliyet dilim başına +1 OCR (~5-10ms, 40ms bütçe içinde); (4) kalıcı ve sıfır-maliyetli en büyük kaldıraç: gerçek gece kırpıntılarının MeanGray histogramını v3 augmentasyon dağılımıyla karşılaştırıp gerekirse gamma aralığını (40,160)'a genişleterek yeniden fine-tune. IR/mono kamera modunda (satürasyon≈0 ile tespit edilir) plaka zaten yüksek kontrastlı olduğundan yalnız global germe kullanılmalı; CLAHE lokal gürültüyü ve taşma halesini büyütür. Öğrenilmiş modeller (Zero-DCE++ 10K param ~1-3ms/kırpıntı, SCI ~0.3K param) teknik olarak bütçeye sığar ve opset-uyumludur ama ikisinin de reposunda LİSANS YOK ve plaka-OCR kazancı kanıtı zayıf — ancak klasik yöntemler platoya ulaşırsa, kendi gece karelerinizle sıfırdan eğitim (Zero-DCE zero-reference, etiket istemez) meşru bir B planıdır. CLAHE'yi OCR öncesi değil, ancak gece tespit-recall düşüşü ölçülürse tam-kare tarafında deneyin. Tüm adımlar mevcut dilim-bazlı ölçüm disiplininizle (her değişiklik kırpıntı-exact ile A/B) doğrulanmalı.",
+        "findings": [
+          {
+            "item": "NEGATİF KANIT 1: Plaka OCR'ında klasik ön-işlemelerin üçü de zarar verdi (körlemesine uygulanınca)",
+            "source": "arXiv 2410.13622 — 'Comparison of Image Preprocessing Techniques for Vehicle License Plate Recognition Using OCR' (https://arxiv.org/abs/2410.13622)",
+            "detail": "Brezilya plakaları + EasyOCR: ön-işlemesiz %71.7; gri dönüşüm %70.75; CLAHE(RGB) %70.75; bilateral filtre %70.75 — HER ön-işleme ~0.95 puan DÜŞÜRDÜ ve süreyi uzattı (7.26s→8.9-9.2s). ANOVA ile doğrulanmış. Neden: modern öğrenilmiş OCR zaten bu varyasyonları görmüş; ön-işleme dağılımı kaydırıp artefakt ekliyor.",
+            "actionable": "Bizim sistemde ön-işlemeyi ASLA tüm kırpıntılara uygulamayın; yalnız 'karanlık tetik' koşulunda uygulayın ve her dilimde kırpıntı-exact A/B ölçün (mevcut ölçüm disiplininiz buna hazır). Beklenen: gündüz dilimlerinde sıfır regresyon garantisi."
+          },
+          {
+            "item": "NEGATİF KANIT 2: Öğrenilmiş low-light iyileştirme (LLIE) yüksek-seviye görevlerde 'marjinal veya negatif'",
+            "source": "arXiv 2409.14461 — 'Low-Light Enhancement Effect on Classification and Detection: An Empirical Study' + arXiv 2501.04210 'Recognition-Oriented LLIE'",
+            "detail": "Ampirik çalışma: LLIE insan gözüne iyi görünür ama sınıflandırma/tespit performansına etkisi tutarsız, çoğu kez marjinal veya negatif; Transformer tabanlı modeller iyileştirilmiş görüntüde hafif GERİLİYOR. 2501.04210 aynı bulguyu metin tanıma için doğruluyor: görsel-kalite hedefli LLIE tanımaya yaramıyor, 'tanıma-yönelimli' hedef gerekiyor. PDF yerel kopya: /Users/omer/.claude/projects/-Users-omer-Desktop-plakaokuma/31305ab5-eac8-415a-b32a-482461d37358/tool-results/webfetch-1783682639122-qfsvlr.pdf",
+            "actionable": "Zero-DCE/SCI'yi 'önce dene' listesine KOYMAYIN. Öncelik sırası: tetik-kapılı klasik germe → çift-okuma oylaması → karanlık fine-tune → ancak plato olursa öğrenilmiş model. Bu bizim CCT OCR'ımız ViT-benzeri (transformer) olduğu için özellikle geçerli."
+          },
+          {
+            "item": "KÖK NEDEN: cct_xs OCR'ın pozlama dayanıklılığı augmentasyona bağlı — global model DAR eğitilmiş, sizin v3 zaten genişletmiş",
+            "source": "fast-plate-ocr GitHub (ankandrew) default augmentation + yerel dosya /Users/omer/Desktop/plakaokuma/OtoparkAnpr/trained_v3/2026-07-10_10-01-00/train_augmentation.yaml",
+            "detail": "fast-plate-ocr VARSAYILAN augmentasyon: RandomBrightnessContrast ±0.1 (p=0.4), RandomGamma 95-105 (p=0.15) — gece için ÇOK dar; CLAHE/shadow/exposure yok. Sizin v3 fine-tune yaml'ı ise brightness (−0.4,+0.15) p=0.5, gamma (60,140) p=0.3, ISONoise/GaussNoise p=0.3 içeriyor. Yani 'modern OCR pozlamaya dayanıklı' savı hazır modeller için YANLIŞ, sizin v3 için KISMEN doğru: brightness −0.4 ≈ ortalamadan ~102 gri çıkarma tabanına kadar dayanıklılık.",
+            "actionable": "1) dataset/live1h + slices'taki GERÇEK gece kırpıntılarının MeanGray/P2-P98 histogramını çıkarın; 2) v3 augmentasyon dağılımının kapsadığı aralıkla karşılaştırın; 3) kapsanmayan kuyruk varsa gamma_limit'i (40,160)'a genişletip + A.CLAHE(p=0.1) ekleyerek yeniden fine-tune (runbook mevcut: docs/finetune-runbook.md). Kalıcı, çıkarım maliyeti SIFIR — literatürde en sağlam kazanç yolu (augmentasyon > test-time enhancement)."
+          },
+          {
+            "item": "POZİTİF KANIT (plaka-özel): LLIE gece plaka doğruluğunu +5.11 puan artırabiliyor — ama OCR karanlığa eğitilmemişse",
+            "source": "Saputra, Suciati, Fatichah — 'Low Light Image Enhancement in License Plate Recognition using URetinex-Net and TRBA', Procedia Computer Science 2024 (sciencedirect.com/science/article/pii/S1877050924003788)",
+            "detail": "URetinex-Net (Retinex-unfolding, ~1M+ param, CPU'da yavaş — bütçemize sığmaz) + TRBA OCR: gece %75.0 → %80.11 (+5.11pp). Kritik nüans: TRBA karanlık augmentasyonsuz eğitilmişti — kazanç, kırpıntıyı OCR'ın eğitim dağılımına geri taşımaktan geliyor. Bu, 2410.13622'nin negatif sonucuyla çelişmez: fark 'OCR'ın gördüğü dağılım'.",
+            "actionable": "Aynı etkiyi ağır ağ yerine ~0.2ms'lik robust persentil germe ile alın: OCR girdimiz ham uint8 [N,64,128,3] normalize edilmediğinden (LicensePlateRecognizer.cs:13), P2→0/P98→255 LUT germe kırpıntıyı doğrudan eğitim parlaklık dağılımına normalize eder. Beklenen kazanç: yalnız-karanlık dilimde +3-6pp (ölçülmeli), gündüzde dokunulmadığı için sıfır risk."
+          },
+          {
+            "item": "ÇİFT-OKUMA OYLAMASI: 'ön-işleme zarar verir' riskini mevcut slot×vocab oylamasıyla sigortalama",
+            "source": "Kendi mimari analizi — /Users/omer/Desktop/plakaokuma/OtoparkAnpr/Anpr.Core/AnprEngine.cs (oylama) + Recognition/LicensePlateRecognizer.cs",
+            "detail": "Literatürdeki tüm negatif sonuçlar 'ya ham YA iyileştirilmiş' ikilemi kurar. Bizim izleyici zaten kare-arası slot×vocab dağılım oylaması yapıyor; karanlık-tetikli kırpıntıda hem ham hem gerilmiş versiyonu OCR'layıp İKİ dağılımı da oya katarsak, germe zarar verdiği karede ham okuma oyu dengeler. Maliyet: yalnız karanlık kırpıntıda +1 OCR geçişi (64x128 CCT-XS ~5-10ms; tüm boru hattı 35.5ms/kare olduğuna göre bütçe ≤40ms/kırpıntı içinde).",
+            "actionable": "AnprEngine'de kalite kapısından (satır ~232) sonra: tetik→SkiaSharp byte-LUT germe→ikinci Recognize→iki PlateOcrResult.slotProbs'u aynı ize besle. WPOD ikinci-geçiş desenini aynen kopyalayan üçüncü 'zenginleştirme şeridi'. Beklenen: tek-yönlü kazanç (oylama kötü oyu seyreltir), gece exact +2-4pp."
+          },
+          {
+            "item": "TETİK METRİĞİ: mevcut CropQualityScorer'a 2 persentil eklemek yeterli — yeni maliyet ~0",
+            "source": "AGCWD (Huang ve ark. 2013, 'Efficient contrast enhancement using adaptive gamma correction...') + yerel /Users/omer/Desktop/plakaokuma/OtoparkAnpr/Anpr.Core/Imaging/CropQualityScorer.cs",
+            "detail": "CropQualityScorer zaten MeanGray, DarkPct(<30), BrightPct(>225), BlurVar hesaplıyor (~0.1ms, tek geçiş). Aynı geçişte 256-kutu histogram toplayıp P2/P98 çıkarılabilir. Literatür (AGCWD) adaptif gamma'yı ortalama yoğunluktan türetir: γ = log(0.5)/log(mean/255), kırpılmış [0.5, 2.5].",
+            "actionable": "KARANLIK DİLİM tanımı önerisi: (MeanGray < 60) VEYA (DarkPct > 0.35) VEYA (P98−P2 < 80, düşük-kontrast/IR-loş). AŞIRI-POZ (far patlaması): BrightPct > 0.2 VE P2 > 100 → germe ters yönde (P2→0 çekme). Eşikler gece slice'larında taranmalı (make_slices.py eşleniği aynı matematiği kullandığından Python tarafında da taranabilir). Kural: tetik yoksa kırpıntıya DOKUNMA."
+          },
+          {
+            "item": "IR/MONO MOD (madde 3): IR aydınlatmalı plaka zaten yüksek kontrast — yalnız GLOBAL germe güvenli, CLAHE riskli",
+            "source": "Survision 'Infrared or White Light for LPR', Adaptive Recognition ANPR illumination blog, e-con Systems ANPR kamera rehberi",
+            "detail": "850/940nm IR + retroreflektif plaka = parlak beyaz zemin/siyah karakter, kontrast doğal olarak yüksek; sorun kontrast değil POZ SEVİYESİ (loş veya patlamış). Mono görüntüde CLAHE lokal karo başına sensör gürültüsünü ve karakter kenarı taşma halesini (blooming) büyütür; 2410.13622'deki CLAHE zararı da bunu destekler. Global lineer germe ise mono görüntüde bilgi kaybetmez, gürültü büyütmesi tekdüzedir.",
+            "actionable": "Kırpıntıda satürasyon testi ekleyin: max|R−G|,|G−B| < 8 → IR/mono rejim → yalnız persentil germe (CLAHE ve gamma varyantlarını atlayın). Renkli gece rejiminde (sodyum lamba, far karışımı) gamma varyantı da denenebilir. Tek if ile iki rejimi ayırmak, A/B matrisini küçültür."
+          },
+          {
+            "item": "ÖĞRENİLMİŞ MODELLER (B planı): Zero-DCE++ ve SCI bütçeye sığar ama lisans YOK ve plaka kanıtı zayıf",
+            "source": "Zero-DCE++ proje sayfası (li-chongyi.github.io/Proj_Zero-DCE++.html), github.com/Li-Chongyi/Zero-DCE_extension, github.com/vis-opt-group/SCI (CVPR 2022), Arm Community AI blog",
+            "detail": "Zero-DCE++: 10K param (~40KB fp32), 0.115 GFLOPs@1200x900 → 64x128 kırpıntıda ~0.9 MFLOP, ORT CPU'da tahmini 1-3ms; opset-uyumlu opler (depthwise conv, tanh, resize), ConvInteger yok; Arm ölçümü: 512x512 int8 ~32ms mobil CPU. SCI (CVPR'22): çıkarımda tek 3x3 conv bloğu (~yüzlerce param), daha da hızlı. ANCAK: iki repoda da GitHub 'license: None' (akademik kullanım varsayımı) — belediye üretim dağıtımı için hukuki risk. Plaka-OCR'a faydası için doğrudan kanıt yok; genel görev kanıtı negatif (arXiv 2409.14461).",
+            "actionable": "Klasik germe+çift-okuma+fine-tune platoya ulaşırsa: Zero-DCE mimarisini SIFIRDAN kendi gece karelerinizle eğitin — zero-reference kayıplar etiket/çift istemez, dataset/live1h geceleri yeterli; kendi eğitiminiz lisans sorununu çözer. Export: opset 17, fp32, ≤100KB. Karar kapısı: yalnız-karanlık dilimde germeye karşı ≥+2pp ek kazanç ölçülürse boru hattına girer."
+          },
+          {
+            "item": "CLAHE'nin gerçek yeri: OCR öncesi DEĞİL, gece TESPİT recall'u düşüyorsa tam-kare tarafı",
+            "source": "IJESTY 'An Improvement of License Plate Detection Under Low Light Condition Using CLAHE and Unsharp Masking' (ijesty.org/index.php/ijesty/article/view/1654)",
+            "detail": "CLAHE+Unsharp Masking düşük ışıkta plaka TESPİTİNİ iyileştirdi (P=0.945, R=0.977, mAP=0.830) — ama bu YOLO tespit metriği, OCR değil. Bizim hedef metrik kırpıntı-exact olduğundan (yani tespit zaten başarılı, kırpıntı var), OCR-öncesi CLAHE için kanıt aleyhte (bkz. 2410.13622). Tam-kare 1920px'te CLAHE CPU maliyeti ise yüksek (~10-20ms) ve SkiaSharp'ta elle yazılması gerekir.",
+            "actionable": "Önce teşhis: gece kaybının kaçı tespit-kaçağı (YOLO plaka bulamadı) kaçı OCR-hatası? Bench loglarından gece diliminde tespit-yok karelerini sayın. OCR-hatası baskınsa (muhtemel) CLAHE'yi tamamen atlayın; tespit-kaçağı anlamlıysa yalnız 'gece modu' bayrağıyla (kare ortalaması < eşik, dakikada bir ölçüm) tam-kare CLAHE'yi ayrı deneyin."
+          },
+          {
+            "item": "PERSENTİL GERME PRESEDANI: plaka tanımada 1.25/98.75 persentil germe yayınlanmış pratik",
+            "source": "ITM Web of Conferences 2025, 'A method for license plate recognition in low-resolution conditions' (itm-conferences.org/articles/itmconf/pdf/2025/04/itmconf_iwadi2024_02028.pdf)",
+            "detail": "Düşük çözünürlüklü plaka çalışması, kontrast germe sınırlarını P1.25/P98.75 olarak alıp detay keskinleşmesi ve doku geri kazanımı raporluyor — bizim önerdiğimiz P2/P98 ile aynı aile. Uç persentil kullanmak (min/max yerine) tekil parlak piksel (far yansıması) ve tekil karanlık pikselin germeyi çökertmesini engeller.",
+            "actionable": "SkiaSharp implementasyonu: CropQualityScorer geçişindeki 256-kutu histogramdan kümülatifle P2/P98 bul → lut[i] = clamp((i−p2)*255/(p98−p2)) → kırpıntı byte'larına uygula. Toplam ek maliyet ~0.2-0.3ms/kırpıntı (bütçenin %1'i). Birim test: sentetik karanlık rampa + gerçek gece kırpıntısı altın-dosyası."
+          }
+        ]
+      },
+      {
+        "key": "agent-skill-arac",
+        "summary": "Hazır skill ekosisteminde bu projenin çekirdeğine (ONNX/görüntü işleme/C#/benchmark) doğrudan hitap eden skill YOK; asıl kazanç, skill FORMATINI kullanıp kendi ölçüm bataryamızı (scripts/regression.sh zaten tek-komut batarya) proje skill'ine sarmak ve model-cerrahisi güvenlik kapısı kurmaktır. anthropics/skills (17 skill) belge/yaratıcı ağırlıklı; tek işe yarayanı skill-creator (skill'ler için evals.json + izole subagent koşusu + benchmark.json A/B döngüsü). obra/superpowers (14 skill) süreç metodolojisi; proje zaten kısmen kullanıyor (docs/superpowers/plans+specs mevcut) — systematic-debugging ve verification-before-completion doğruluk-regresyonu avlarken faydalı, alan bilgisi katmaz. K-Dense scientific-agent-skills (149 skill, MIT) çoğunlukla biyo/kimya; ama statistical-power ve statistical-analysis, '%84→%86 N=200 kırpıntıda anlamlı mı' sorusunu ciddileştirmek için gerçekten işe yarar. Skill formatı: SKILL.md + YAML frontmatter (description, argument-hint, disable-model-invocation, allowed-tools, context:fork, paths), ~/.claude/skills/ (kişisel) veya .claude/skills/ (proje, commitlenebilir), oturum içinde canlı yenilenir; en güçlü desen !`komut` dinamik bağlam enjeksiyonu — bench geçmişi/referans değerler skill açılırken otomatik bağlama girer. ONNX inceleme için netron sadece GUI/sunucu (metin çıktısı yok, ajan-dostu değil); ajan iş akışında metin tabanlı onnx-tool (pip, MIT, aktif; katman-bazlı MACs/param/bellek profili) ve polygraphy (GPU'suz, --onnxrt CPU backend ile orijinal-vs-optimize çıktı karşılaştırma, tolerans 1e-5) kullanılmalı; onnxcli ARŞİVLENDİ (24 Haz 2026), atla. Optimizasyon güvenliği: onnxoptimizer TEHLİKELİ — OODTE diferansiyel test çalışması (arXiv 2505.01892) varsayılan geçişlerde %9.2 çökme/geçersiz model, tespit/segmentasyon modellerinde %16.6 çıktı sapması ve YOLO ailesinde 14.31 puana varan mAP düşüşü buldu (fuse_bn_into_conv başlıca suçlu); onnx-simplifier (onnxsim 0.6.5, Haziran 2026, aktif bakımda) rastgele-girdi çıktı doğrulaması yaptığı için daha güvenli ama altta onnxoptimizer geçişlerini kullanır — her model cerrahisinden sonra polygraphy/regression.sh kapısı şart. En güvenli optimizasyon yolu ORT'nin KENDİ offline optimizasyonu (SessionOptions.optimized_model_filepath): koşan runtime ile optimize eden aynı motor; yalnız BASIC seviyede kaydet — extended/all donanıma-özel (AVX/NCHWc) op gömer, zayıf hedef Intel CPU'da ancak hedef makinede üretilirse geçerli. Ölçüm otomasyonu için somut plan: (1) .claude/skills/anpr-regression/ — regression.sh'i saran, referans metrikleri dinamik enjeksiyonla yükleyen, disable-model-invocation:true skill; (2) .claude/skills/onnx-safety-gate/ — onnx-tool op-taraması (ConvInteger/opset>17 avı) + polygraphy çıktı-eşitliği; (3) yerleşik /run-skill-generator ile dotnet build/çalıştırma reçetesini kaydet; (4) update-config ile models/ değişikliğinde bench hatırlatan hook. Kurulumlar: skill-creator → /plugin install skill-creator@claude-plugins-official; superpowers → /plugin marketplace add obra/superpowers-marketplace && /plugin install superpowers@superpowers-marketplace; K-Dense → git clone + seçili klasörleri ~/.claude/skills'e kopyala; pip install onnx-tool onnxsim polygraphy netron (yerelde Python 3.13.7 hazır). Azure-vision gibi bulut skill'leri mevcut ama yerel/zayıf-CPU/gizlilik kurallarını ihlal ettiği için elenmelidir.",
+        "findings": [
+          {
+            "item": "SKILL.md formatı ve resmi şablon (kendi skill'imizi yazmak için)",
+            "detail": "Yapı: skill-adi/SKILL.md + YAML frontmatter. Alanlar: name (ops., klasör adı komut adıdır), description (tetikleme metni, when_to_use ile birlikte 1536 karakter sınırı), argument-hint, arguments, disable-model-invocation (sadece kullanıcı /komut ile çağırır), user-invocable:false (sadece Claude), allowed-tools (izin öngörümü, ör. Bash(bash scripts/regression.sh *)), context:fork + agent (izole subagent'ta koşum), paths (glob ile dosya-bazlı tetikleme), hooks. Desenler: !`komut` dinamik bağlam enjeksiyonu (skill yüklenmeden ÖNCE shell koşar, çıktı metne gömülür), ```! çok-satırlı blok, $ARGUMENTS/$0/$1, ${CLAUDE_SKILL_DIR}, ${CLAUDE_PROJECT_DIR}. Konumlar: ~/.claude/skills/ (kişisel) ve .claude/skills/ (proje, git'e commitlenir); oturum içi canlı yenileme var. SKILL.md ≤500 satır; detay references/ dosyalarına.",
+            "actionable": "Proje skill'i şablonu — /Users/omer/Desktop/plakaokuma/OtoparkAnpr/.claude/skills/anpr-regression/SKILL.md:\n---\nname: anpr-regression\ndescription: ANPR regresyon bataryasını (diag4 kamera-referans, live1h, val+gece kırpıntı-exact) verilen OCR modeliyle koşar ve referanslarla karşılaştırır.\nargument-hint: [ocr_model.onnx]\ndisable-model-invocation: true\nallowed-tools: Bash(bash scripts/regression.sh *), Read\n---\n## Referanslar (son koşumlar)\n!`tail -20 docs/bench-history.md 2>/dev/null || echo 'geçmiş yok'`\n## Görev\n1. CAM_PW ortam değişkenini kullanıcıdan iste, `bash scripts/regression.sh $0` çalıştır (vars: cct_xs_v2_erz.onnx).\n2. 4 metriği referansla kıyasla: diag4 TOPLAM (erz 22/26), live1h emit, val kırpıntı-exact %75, gece %84.\n3. Gerileyen dilimi NEDENİYLE raporla; sonucu docs/bench-history.md'ye tarihli satır ekle.\nKazanç: her model/config değişikliğinde tek /anpr-regression komutu, referanslar otomatik bağlamda, sonuç geçmişi birikir.",
+            "source": "https://code.claude.com/docs/en/skills"
+          },
+          {
+            "item": "anthropics/skills (resmi repo, 17 skill) — bu projeye DOĞRUDAN yarayan yok, istisna: skill-creator",
+            "detail": "İçerik: algorithmic-art, brand-guidelines, canvas-design, claude-api, doc-coauthoring, docx, frontend-design, internal-comms, mcp-builder, pdf, pptx, skill-creator, slack-gif-creator, theme-factory, web-artifacts-builder, webapp-testing, xlsx. Görüntü işleme / ONNX / C#.NET / benchmark skill'i YOK. skill-creator: kendi skill'lerimizi yazma + eval döngüsü (evals.json test senaryoları, her senaryo izole subagent'ta koşar, grading.json geç/kal, benchmark.json skill'li-vs-skill'siz kıyas, açıklama A/B ayarı). Kurulum: /plugin marketplace add anthropics/skills → /plugin install example-skills@anthropic-agent-skills; skill-creator için tercihen /plugin install skill-creator@claude-plugins-official (+/reload-plugins). Alternatif: klasörü ~/.claude/skills'e kopyalamak da çalışır.",
+            "actionable": "skill-creator'ı kur ve anpr-regression / onnx-safety-gate skill'lerini yazarken kullan; eval döngüsü bizim 'her dilimde kazanç ölç' felsefemizin skill'lere uygulanmış hali. Geri kalan 16 skill için dürüst cevap: bu projede işe yaramaz (xlsx en fazla rapor tablosu üretiminde marjinal).",
+            "source": "https://github.com/anthropics/skills"
+          },
+          {
+            "item": "obra/superpowers (14 süreç skill'i) — alan bilgisi yok, süreç disiplini var; proje ZATEN kısmen kullanıyor",
+            "detail": "Skill'ler: brainstorming, writing-plans, executing-plans, subagent-driven-development, dispatching-parallel-agents, systematic-debugging (4-fazlı kök-neden analizi), test-driven-development, verification-before-completion, requesting/receiving-code-review, using-git-worktrees, finishing-a-development-branch, writing-skills, using-superpowers. Projede docs/superpowers/plans+specs klasörleri ve ~/.claude/skills/brainstorming zaten mevcut — konvansiyon kurulu. Kurulum: /plugin marketplace add obra/superpowers-marketplace → /plugin install superpowers@superpowers-marketplace (veya superpowers@claude-plugins-official). Deneysel ek: obra/superpowers-lab.",
+            "actionable": "ONNX/ANPR'a özel hiçbir şey katmaz; ama systematic-debugging 'gece doğruluğu neden düştü' tarzı regresyon avlarında, verification-before-completion ise 'kazanç ölçülmeden bitti deme' kuralımızı zorlamada faydalı. writing-skills, kendi skill'lerimizi yazarken şablon disiplini verir. Tam paketi kurmak yerine bu 3 skill klasörünü kopyalamak daha az bağlam maliyeti getirir.",
+            "source": "https://github.com/obra/superpowers"
+          },
+          {
+            "item": "K-Dense scientific-agent-skills (149 skill, MIT) — sadece istatistik skill'leri işe yarar",
+            "detail": "149 skill'in ezici çoğunluğu biyoinformatik/kimya (scanpy, rdkit, biopython...). Görüntü işleme/ONNX/YOLO/benchmark skill'i YOK (histolab/pathml patoloji-özel). İşe yarar olanlar: statistical-power (örneklem büyüklüğü/güç analizi), statistical-analysis, experimental-design, exploratory-data-analysis, statsmodels. MIT lisans, ticari kullanım serbest. Kurulum: git clone https://github.com/K-Dense-AI/scientific-agent-skills && cp -r scientific-agent-skills/skills/{statistical-power,statistical-analysis} ~/.claude/skills/",
+            "actionable": "Gece %84→%90 hedefinde ölçümlerin anlamlılığı kritik: N=~200 gece kırpıntısında +2 puanlık fark şans eseri olabilir. statistical-power skill'i 'iyileştirmeyi %95 güvenle görmek için kaç örnek gerekli' sorusunu (McNemar/binom testi) sistematik cevaplatır — regression.sh çıktısına anlamlılık kolonu eklemek için kullan.",
+            "source": "https://github.com/K-Dense-AI/scientific-agent-skills"
+          },
+          {
+            "item": "Awesome listeleri (VoltAgent 1000+, travisvn, ComposioHQ) — ONNX/ANPR için dürüst cevap: YOK",
+            "detail": "VoltAgent/awesome-agent-skills taramasında görüntü işleme/ONNX/model-optimizasyon/benchmark kategorilerinde skill bulunamadı. En yakınları: microsoft/azure-ai-vision-imageanalysis-dotnet (bulut OCR/tespit) ve fal-ai-community/fal-vision (bulut görüntü analizi) — ikisi de bulut API'si.",
+            "actionable": "Kullanma: bulut tabanlılar hem 'zayıf yerel CPU, yerinde çalışır' kısıtını hem gizlilik politikasını (plaka verisi = kişisel veri, belediye ağı dışına çıkmaz) ihlal eder. Bu alanda hazır skill beklemek yerine kendi 2-3 proje skill'imizi yazmak tek gerçekçi yol.",
+            "source": "https://github.com/VoltAgent/awesome-agent-skills"
+          },
+          {
+            "item": "netron (v9.1.4, Tem 2026) — GUI/sunucu var, metin modu YOK; ajan iş akışına uygun değil",
+            "detail": "CLI bayrakları kaynak koddan doğrulandı: netron [dosya] -p/--port, --host, -b/--browse (tarayıcı açar), --verbosity, --version. `pip install netron` sonrası `netron -p 8081 --host 127.0.0.1 models/cct_xs_v2_erz.onnx` tarayıcısız HTTP sunucu başlatır. Metin/JSON çıktısı yok — çıktısı yalnızca insan gözü için.",
+            "actionable": "İnsan incelemesi (mimari şema, kafa çıkışları) için kur; ama Claude Code'un model incelemesinde kullanma — ajan-dostu metin çıktısı için onnx-tool/polygraphy/onnx Python API tercih et. Örn. WPOD veya cct kafa isimlerini doğrularken: python3 -c \"import onnx; m=onnx.load('models/wpod_lpd.onnx'); print([ (o.name,[d.dim_value for d in o.type.tensor_type.shape.dim]) for o in m.graph.output])\"",
+            "source": "https://github.com/lutzroeder/netron"
+          },
+          {
+            "item": "onnx-tool (pip install onnx-tool, MIT, aktif) — ajan-dostu katman-bazlı profil + op envanteri",
+            "detail": "Katman başına MACs/parametre/bellek profili, hızlı shape inference, bellek-içi graf düzenleme, sabit katlama; PyTorch-destekli referans motoru CPU'da çalışır, GPU/OpenCV gerektirmez. 490 yıldız, 263+ commit, MIT. Python API: from onnx_tool import Model; m=Model('models/cct_xs_v2_erz.onnx'); m.graph.shape_infer({...}); m.graph.profile(); m.graph.print_node_map() → tablo halinde hangi bloğun kaç MAC yediği. Alternatif onnxcli 24 Haziran 2026'da ARŞİVLENDİ (read-only) — kullanma.",
+            "actionable": "İki kullanım: (1) 40ms bütçe avı — cct_xs_v2'de MAC'lerin hangi bloklarda yoğunlaştığını görüp WPOD ikinci-geçiş maliyetini teorik doğrula; (2) dağıtım öncesi op-envanter kapısı — 'ConvInteger var mı, opset ≤17 mi' kontrolünü scripts/ altına 5 satırlık python ile ekle: import onnx; m=onnx.load(f); assert 'ConvInteger' not in {n.op_type for n in m.graph.node} and all(i.version<=17 for i in m.opset_import if i.domain=='')",
+            "source": "https://github.com/ThanatosShinji/onnx-tool"
+          },
+          {
+            "item": "onnxoptimizer TEHLİKELİ — OODTE diferansiyel test bulguları (bilhassa tespit modelleri için)",
+            "detail": "arXiv 2505.01892 (OODTE): onnxoptimizer'ın varsayılan geçiş setiyle model örneklerinin %9.2'si çöktü ya da geçersiz model üretti; sınıflandırma modellerinin ~%30'unda, tespit/segmentasyon modellerinin %16.6'sında orijinalden farklı çıktı; YOLO/SSD/RetinaNet ailesinde 14.31 puana varan mAP düşüşleri. Sorunlu geçişler: fuse_bn_into_conv (doğruluk bozan başlıca geçiş), lift_lexical_references, split_init/split_predict, eliminate_shape_gather, rewrite_input_dtype, eliminate_consecutive_idempotent_ops, eliminate_duplicate_initializer (çökmeler). 47 geçişten 9'u etkilenmiş, 14'ü daha önce bilinmeyen 15 hata raporlanmış.",
+            "actionable": "YOLOv9-t tespit modelimiz tam riskli sınıfta: onnxoptimizer'ı varsayılan geçişlerle ASLA kullanma; onnxslim'e alternatif ararken bu araç cevap değil. Herhangi bir optimizasyon zorunluysa fuse_bn_into_conv'u dışla ve her koşumdan sonra çıktı-eşitlik kapısından (polygraphy veya regression.sh dilim metrikleri) geçir.",
+            "source": "https://arxiv.org/html/2505.01892v2"
+          },
+          {
+            "item": "onnx-simplifier (onnxsim 0.6.5, Haziran 2026 — aktif) daha güvenli ama koşullu; EN güvenlisi ORT'nin kendi offline optimizasyonu",
+            "detail": "onnxsim yeni org (onnxsim/onnxsim) altında bakımda, 447K/ay indirme; dinamik girdi desteği yerleşik (deprecated dynamic_input_shape bayrağı kalktı), rastgele girdiyle orijinal-vs-basit model çıktı doğrulaması yapar (--check ile tekrar sayısı). Tuzaklar: initializer'ları immutable sayar (--mutable-initializer gerekebilir), altta onnxoptimizer geçişlerini kullandığı için OODTE riskini kısmen miras alır. ORT offline optimizasyon: SessionOptions.optimized_model_filepath + GraphOptimizationLevel — optimize eden ve koşan motor AYNI olduğu için semantik uyuşmazlık riski minimum; ama ORT dokümanı uyarıyor: extended/all seviye donanıma-özel (AVX2/NCHWc) düzen gömer, farklı CPU'da geçersiz. Dinamik boyut sabitleme için resmi araç: python -m onnxruntime.tools.make_dynamic_shape_fixed.",
+            "actionable": "Sıralama önerisi: (1) varsayılan olarak HİÇ offline optimizasyon yapma — ORT zaten oturum açılışında online optimize ediyor, kazanç sadece açılış süresi; (2) açılışı kısaltmak istenirse optimize edilmiş modeli HEDEF makinede, basic seviyede üret (ORT_ENABLE_BASIC + optimized_model_filepath, sonra çalışma anında ORT_DISABLE_ALL ile yükle); (3) boyut küçültme gerekirse onnxsim'i --check 10 ile koş ve ardından regression.sh dilim metriklerinden geçir. pip install onnxsim.",
+            "source": "https://onnxruntime.ai/docs/performance/model-optimizations/graph-optimizations.html"
+          },
+          {
+            "item": "polygraphy — GPU'suz, ONNX Runtime backend'iyle model-cerrahisi sonrası çıktı-eşitlik kapısı",
+            "detail": "NVIDIA paketi ama TensorRT olmadan CPU'da çalışır: OnnxrtRunner CPUExecutionProvider'ı destekler. Komutlar: `polygraphy inspect model models/x.onnx --show layers` (op listesi/şekiller, metin çıktı); `polygraphy run orijinal.onnx --onnxrt --save-outputs ref.json` + `polygraphy run optimize.onnx --onnxrt --load-outputs ref.json` → otomatik tolerans karşılaştırması (varsayılan ~1e-5, ayarlanabilir). Kurulum: pip install polygraphy onnxruntime (Python 3.13.7 makinede hazır).",
+            "actionable": "onnx-safety-gate proje skill'inin çekirdeği yap: herhangi bir model dönüşümünden (simplify, kuantizasyon, opset düşürme, kafa kırpma) sonra tek komutla 'sayısal olarak aynı model mi' cevabı. Rastgele girdi yerine gerçek kırpıntılarla beslemek için --data-loader-script ile dataset/finetune'dan örnek yükleyen 10 satırlık script eklenebilir — böylece kapı, gerçek dağılımda doğrular.",
+            "source": "https://docs.nvidia.com/deeplearning/tensorrt/latest/_static/polygraphy/_modules/polygraphy/backend/onnxrt/runner.html"
+          },
+          {
+            "item": "Ölçüm bataryası otomasyon desenleri — mevcut regression.sh üstüne 4 somut katman",
+            "detail": "Proje zaten tek-komut bataryaya sahip (/Users/omer/Desktop/plakaokuma/OtoparkAnpr/scripts/regression.sh: birim test + diag4 kamera-referans + live1h evaluate + val/gece kırpıntı-exact, referanslar yorumlarda gömülü). Claude Code katmanları: (1) skill sarmalayıcı — anpr-regression skill'i (yukarıdaki şablon), disable-model-invocation:true ile yanlışlıkla tetiklenmez, allowed-tools ile izin sorusu çıkmaz; (2) dinamik bağlam enjeksiyonu — !`tail docs/bench-history.md` ile geçmiş sonuçlar skill açılırken bağlama girer, Claude kıyası kendisi yapar; (3) /run-skill-generator (yerleşik) — dotnet build/run reçetesini bir kez kaydeder, /run ve /verify sonrası Anpr.Bench'i doğru parametrelerle başlatır; (4) hook — update-config skill'i ile PostToolUse hook'u: models/*.onnx veya appsettings değişince 'regresyon koşulmadı' hatırlatması (deterministik, modelin insafına kalmaz). Uzun koşumlar için context:fork + agent ile bataryayı subagent'ta koşturup ana bağlamı temiz tutma seçeneği var.",
+            "actionable": "Uygulama sırası: önce .claude/skills/anpr-regression/ ve .claude/skills/onnx-safety-gate/ yaz (toplam ~1 saat iş), git'e commit et — böylece her Claude oturumu ve subagent aynı ölçüm disiplinini görür; sonra /run-skill-generator'ı bir kez çalıştır; hook'u en son ekle (opsiyonel). Beklenen kazanç: 'değişiklik→ölçüm→kıyas→tarihçe' döngüsü tek komuta iner ve dilim-bazlı gerileme (örn. gece seti) hiçbir değişiklikte gözden kaçmaz.",
+            "source": "https://code.claude.com/docs/en/skills"
+          }
+        ]
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Araştırma"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "arastir:super-cozunurluk",
+      "phaseIndex": 1,
+      "phaseTitle": "Araştırma",
+      "agentId": "a993e9596d2761153",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1783682394169,
+      "queuedAt": 1783682394156,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Plaka SR araştırması dört koldan doğrulandı ve en kritik bu…",
+      "promptPreview": "BAĞLAM: Türkiye plaka tanıma, zayıf GPU'suz CPU (C#/.NET8 + ONNX Runtime 1.23 + SkiaSharp, OpenCV YOK).\nÇalışan boru hattı: YOLOv9-t-384 tespit + cct_xs_v2 OCR (64x128 stretch girdi) + slot×vocab dağılım\noylaması + TR-gramer kısıtlı çözümleme + WPOD rektifikasyon ikinci-geçişi (YENİ: her dilimde kazanç ölçüldü).\nKalan hedefler: gece %84→%90+ (kırpıntı-exact), küçük/uzak plaka (<100px genişlik), bu…",
+      "lastProgressAt": 1783682893347,
+      "tokens": 53690,
+      "toolCalls": 21,
+      "durationMs": 499176,
+      "resultPreview": "{\"summary\":\"Plaka SR araştırması dört koldan doğrulandı ve en kritik bulgu şu: literatürdeki en güncel kanıtlar (TextZoom Table 2 ve ICPR 2026 LRLPR yarışması) SR ile LR-dayanıklı OCR eğitiminin başa baş olduğunu, kombinasyonun ve çok-kare oylamanın asıl kazancı verdiğini gösteriyor. TextZoom'da ASTER'ı LR görüntülerle fine-tune etmek (%59.3), TSRN süper çözünürlük + hazır ASTER'dan (%58.3) daha i…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "arastir:gece-iyilestirme",
+      "phaseIndex": 1,
+      "phaseTitle": "Araştırma",
+      "agentId": "a9063e235f0e86c7b",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1783682394172,
+      "queuedAt": 1783682394157,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Gece iyileştirme araştırmasının ana sonucu: literatür 'körl…",
+      "promptPreview": "BAĞLAM: Türkiye plaka tanıma, zayıf GPU'suz CPU (C#/.NET8 + ONNX Runtime 1.23 + SkiaSharp, OpenCV YOK).\nÇalışan boru hattı: YOLOv9-t-384 tespit + cct_xs_v2 OCR (64x128 stretch girdi) + slot×vocab dağılım\noylaması + TR-gramer kısıtlı çözümleme + WPOD rektifikasyon ikinci-geçişi (YENİ: her dilimde kazanç ölçüldü).\nKalan hedefler: gece %84→%90+ (kırpıntı-exact), küçük/uzak plaka (<100px genişlik), bu…",
+      "lastProgressAt": 1783682858143,
+      "tokens": 53626,
+      "toolCalls": 29,
+      "durationMs": 463971,
+      "resultPreview": "{\"summary\":\"Gece iyileştirme araştırmasının ana sonucu: literatür 'körlemesine ön-işleme' aleyhine, 'tetik-kapılı + oylamayla sigortalı ön-işleme' ve 'karanlık augmentasyonla fine-tune' lehine. Karşı-soru (4) doğrulandı: Brezilya plaka çalışmasında (arXiv 2410.13622) CLAHE/gri/bilateral ÜÇÜ DE doğruluğu düşürdü (71.7%→70.75%) ve genel ampirik çalışma (arXiv 2409.14461) LLIE'nin tanıma görevlerine …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "arastir:agent-skill-arac",
+      "phaseIndex": 1,
+      "phaseTitle": "Araştırma",
+      "agentId": "a9249e57d586b7608",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1783682394172,
+      "queuedAt": 1783682394157,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Hazır skill ekosisteminde bu projenin çekirdeğine (ONNX/gör…",
+      "promptPreview": "BAĞLAM: Türkiye plaka tanıma, zayıf GPU'suz CPU (C#/.NET8 + ONNX Runtime 1.23 + SkiaSharp, OpenCV YOK).\nÇalışan boru hattı: YOLOv9-t-384 tespit + cct_xs_v2 OCR (64x128 stretch girdi) + slot×vocab dağılım\noylaması + TR-gramer kısıtlı çözümleme + WPOD rektifikasyon ikinci-geçişi (YENİ: her dilimde kazanç ölçüldü).\nKalan hedefler: gece %84→%90+ (kırpıntı-exact), küçük/uzak plaka (<100px genişlik), bu…",
+      "lastProgressAt": 1783682876460,
+      "tokens": 74175,
+      "toolCalls": 34,
+      "durationMs": 482288,
+      "resultPreview": "{\"summary\":\"Hazır skill ekosisteminde bu projenin çekirdeğine (ONNX/görüntü işleme/C#/benchmark) doğrudan hitap eden skill YOK; asıl kazanç, skill FORMATINI kullanıp kendi ölçüm bataryamızı (scripts/regression.sh zaten tek-komut batarya) proje skill'ine sarmak ve model-cerrahisi güvenlik kapısı kurmaktır. anthropics/skills (17 skill) belge/yaratıcı ağırlıklı; tek işe yarayanı skill-creator (skill'…"
+    }
+  ],
+  "totalTokens": 181491,
+  "totalToolCalls": 84
+}
