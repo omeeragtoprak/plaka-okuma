@@ -237,3 +237,81 @@ public class PlateConfirmerTests
         Assert.Empty(c.DrainReady(t));
     }
 }
+
+public class SpatialMergeTests
+{
+    private static PlateReading Reading(string text, float conf, PlateBox box) => new()
+    {
+        Text = text,
+        RawText = text.Replace(" ", ""),
+        Confidence = conf,
+        DetectorConfidence = conf,
+        OcrConfidence = conf,
+        Box = box,
+        IsValidTr = true,
+    };
+
+    private static PlateConfirmer New(float spatialIou) => new(new PlateConfirmerOptions
+    {
+        DedupWindow = TimeSpan.FromSeconds(8),
+        SettleWindow = TimeSpan.FromSeconds(3),
+        MinConfirmations = 2,
+        FuzzyMergeDistance = 1,
+        SpatialMergeIou = spatialIou,
+    });
+
+    [Fact]
+    public void Heavy_variants_of_same_physical_plate_merge_into_single_emit()
+    {
+        // GERÇEK VAKA (2026-07-08 16:12, çıkış): aynı araç 4 ayrı emit üretti çünkü varyantlar arası
+        // lev>1: 26ADD884 / 26ADJ888 / 25DDS84 / 25DUS88. Kutular ardışık karelerde çakışıyor ->
+        // uzamsal birleşme hepsini TEK ize toplamalı; tek emit çıkmalı.
+        var c = New(spatialIou: 0.35f);
+        var t = new DateTimeOffset(2026, 7, 8, 13, 12, 43, TimeSpan.Zero);
+
+        c.Observe(Reading("26 ADD 884", 0.86f, new PlateBox(870, 703, 134, 51)), t);
+        c.Observe(Reading("26 ADJ 888", 0.68f, new PlateBox(880, 700, 132, 52)), t.AddSeconds(0.2));
+        c.Observe(Reading("25 DDS 84", 0.94f, new PlateBox(892, 698, 130, 52)), t.AddSeconds(0.4));
+        c.Observe(Reading("25 DUS 88", 0.60f, new PlateBox(905, 695, 128, 53)), t.AddSeconds(0.6));
+        c.Observe(Reading("25 DDS 84", 0.95f, new PlateBox(918, 692, 127, 53)), t.AddSeconds(0.8));
+
+        var ready = c.DrainReady(t.AddSeconds(1));
+
+        Assert.Single(ready); // TEK olay (uzamsal birleşme olmadan 3-4 ayrı iz olurdu)
+    }
+
+    [Fact]
+    public void Spatially_disjoint_plates_stay_separate()
+    {
+        // Aynı anda iki FARKLI araç (kutular ayrık) birleşmemeli.
+        var c = New(spatialIou: 0.35f);
+        var t = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+
+        c.Observe(Reading("25 ABC 123", 0.9f, new PlateBox(100, 100, 120, 50)), t);
+        c.Observe(Reading("34 XYD 456", 0.9f, new PlateBox(900, 700, 120, 50)), t.AddSeconds(0.2));
+        c.Observe(Reading("25 ABC 123", 0.9f, new PlateBox(105, 102, 120, 50)), t.AddSeconds(0.4));
+        c.Observe(Reading("34 XYD 456", 0.9f, new PlateBox(905, 702, 120, 50)), t.AddSeconds(0.6));
+
+        var ready = c.DrainReady(t.AddSeconds(1));
+        Assert.Equal(2, ready.Count);
+    }
+
+    [Fact]
+    public void Stale_track_not_spatially_chained()
+    {
+        // Kapıda aynı NOKTAYA 3 sn sonra gelen FARKLI araç (kuyruk) zincirlenmemeli (MaxGap=1.5s).
+        var c = New(spatialIou: 0.35f);
+        var t = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+
+        c.Observe(Reading("25 ABC 123", 0.9f, new PlateBox(500, 500, 120, 50)), t);
+        c.Observe(Reading("25 ABC 123", 0.9f, new PlateBox(505, 500, 120, 50)), t.AddSeconds(0.2));
+        // 3 sn sonra aynı yerde bambaşka plaka (yeni araç)
+        c.Observe(Reading("34 KLM 789", 0.9f, new PlateBox(500, 500, 120, 50)), t.AddSeconds(3.5));
+        c.Observe(Reading("34 KLM 789", 0.9f, new PlateBox(505, 500, 120, 50)), t.AddSeconds(3.7));
+
+        var ready = c.DrainReady(t.AddSeconds(4));
+        Assert.Equal(2, ready.Count);
+        Assert.Contains(ready, r => r.Text == "25 ABC 123");
+        Assert.Contains(ready, r => r.Text == "34 KLM 789");
+    }
+}

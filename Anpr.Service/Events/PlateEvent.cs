@@ -42,4 +42,7 @@ public sealed record PlateEvent
     /// yerine operatör onayına düşürmelidir (kirli/karlı/bulanık plaka akışı).
     /// </summary>
     public bool LowConfidence { get; init; }
+
+    /// <summary>Top-K alternatif okuma adayı (whitelist toleransı; ilki Plate ile aynıdır). Yoksa null.</summary>
+    public IReadOnlyList<PlateCandidate>? Candidates { get; init; }
 }

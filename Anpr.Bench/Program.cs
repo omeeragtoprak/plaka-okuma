@@ -128,6 +128,8 @@ void RunEvaluate(string datasetDir, string labelsPath, BenchOptions o)
             ConstrainedDecoding = o.Constrained,
             MergeAcrossProvince = o.MergeProvince,
             FuzzyMergeDistance = o.Fuzzy,
+            SpatialMergeIou = o.SpatialIou,
+            SkipCharLevel = o.SkipChar,
         });
         var epoch = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -289,6 +291,8 @@ void RunEmitSim(string framesDir, BenchOptions o)
         MergeAcrossProvince = o.MergeProvince,
         FuzzyMergeDistance = o.Fuzzy,
         EarlyEmitMinOcr = o.EarlyEmit,
+        SpatialMergeIou = o.SpatialIou,
+        SkipCharLevel = o.SkipChar,
     });
     var epoch = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
     var emitted = new List<string>();
@@ -574,6 +578,8 @@ BenchOptions ParseArgs(string[] a)
         SettleSec = double.Parse(ArgVal(a, "--settle") ?? "3", CultureInfo.InvariantCulture),
         DedupSec = double.Parse(ArgVal(a, "--dedup") ?? "8", CultureInfo.InvariantCulture),
         EarlyEmit = float.Parse(ArgVal(a, "--earlyemit") ?? "0", CultureInfo.InvariantCulture),
+        SpatialIou = float.Parse(ArgVal(a, "--spatialiou") ?? "0", CultureInfo.InvariantCulture),
+        SkipChar = float.Parse(ArgVal(a, "--skipchar") ?? "0", CultureInfo.InvariantCulture),
         Trace = (ArgVal(a, "--trace") ?? "").ToUpperInvariant(),
         CharVote = (ArgVal(a, "--charvote") ?? "true") != "false",
         Deskew = (ArgVal(a, "--deskew") ?? "false") == "true",
@@ -609,6 +615,8 @@ sealed class BenchOptions
     public string Det = "", Ocr = "", OcrCfg = "";
     public double Fps = 3, SettleSec = 3, DedupSec = 8;
     public float EarlyEmit = 0;
+    public float SpatialIou = 0;   // uzamsal iz birleştirme (0=kapalı, baseline)
+    public float SkipChar = 0;     // SKIP_CHAR seviyesi (0=kapalı, baseline)
     public string Trace = "";
     public string Roi = "";
     public float MinConf, MinOcr;

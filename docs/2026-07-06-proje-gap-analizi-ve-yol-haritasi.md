@@ -184,3 +184,27 @@ kaçanların 4'ü cadde-imzalı ve 3'ünü diğer kameramız okudu; tek gerçek 
 kendisi de iki kamerada FARKLI okudu. **25ADY647'yi iki kameramız güven 1.00 ile okudu — Hikvision
 hiç kaydetmedi** (kamerayı geçtiğimiz ölçülü örnek). Panel (giriş): birebir %69, sadece-kamera 1.
 diag4 regresyonu değişmedi (22/26). CPU %25, RSS ~265MB (tüm-kare + 2 gözlem OCR dahil).
+
+## 5e. Güncelleme (2026-07-10): "Bir araç = bir olay" paketi (uzamsal iz + SKIP_CHAR + adaylar + %85)
+
+Kullanıcı vakası (07-08 16:12, çıkış): aynı araç 4 emit üretti (26ADD884/26ADJ888/25DDS84/25DUS88 —
+gerçek plaka 25DDS84, başka geçişlerde defalarca güven 1.00). Kök neden: varyantlar arası lev>1 →
+fuzzy birleşme köprü kuramadı; her iz 2 onayla erken emit oldu. Çözüm paketi (hepsi ölçüldü):
+
+1. **Uzamsal iz birleştirme** (`SpatialMergeIou=0.35`, gap ≤1.5 sn, lev ≤4): metin köprüsü olmasa da
+   kutusu çakışan taze iz = aynı fiziksel plaka → oylar tek havuzda. diag4: birebir 22/26 KORUNDU,
+   gürültü 14→11 (−%21). Birim test gerçek 25DDS84 vakasını yeniden üretiyor: 5 gözlem → TEK emit.
+2. **SKIP_CHAR** (`SkipCharLevel=0.3`): eşik-altı hayalet son hane "karakter yok" hipotezine yenilir
+   (24ACB27_ sınıfı). 0.5 agresifti (diag4'te −1 birebir), 0.3 birebiri koruyor.
+3. **Top-K adaylar** (`CandidateCount=5`): uzlaşı olayında alternatif okumalar taşınır (whitelist
+   toleransı + bastırma köprüsü); panelde satır tooltip'i.
+4. **Emit-sonrası varyant bastırma** (`VariantSuppressSeconds=30`): yeni emit önceki emitin aday
+   listesindeyse VEYA düşük güvenli (<0.85) yeni emit, ≥0.9 güvenli yakın (lev≤2) emitin komşusuysa
+   olay yayınlanmaz (loglanır). Kamera-ayrımı korunur (giriş/çıkış ayrı).
+5. **EarlyEmitMinOcr=0.85 + ManualReviewMinOcr=0.85** (kullanıcı istedi): iz, uzlaşı güveni %85'e
+   ulaşana dek takip edilir (araç yaklaştıkça daha iyi kare); en geç settle'da emit — geç kalan
+   düşük güvenliler `LowConfidence` bayrağıyla çıkar (panelde sarı "düşük güven" rozeti).
+
+Regresyon: live1h 87/101 recall + emit sayıları özellikler açık/kapalı BİREBİR AYNI (nötr);
+diag4 gürültü −%21; 60/60 birim test. Not: eski "31 yanlış-emit" referansı farklı bayraklı koşuymuş —
+güncel taban 34; bataryaya bayraklar sabitlendi (`--spatialiou --skipchar`).

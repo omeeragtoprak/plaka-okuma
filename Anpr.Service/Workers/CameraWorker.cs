@@ -35,6 +35,10 @@ public sealed class CameraWorker : IAsyncDisposable
     }
     private readonly List<CropBucket> _cropBuckets = new();
 
+    // Emit-sonrası varyant bastırma: kapsam başına son emitler (compact + aday kümesi + zaman).
+    private sealed record RecentEmit(DateTimeOffset At, string Compact, HashSet<string> Candidates, string Scope, float OcrConf);
+    private readonly List<RecentEmit> _recentEmits = new();
+
     private CancellationToken _ct;
     private Task? _loopTask;
 
@@ -83,6 +87,9 @@ public sealed class CameraWorker : IAsyncDisposable
             MergeAcrossProvince = options.MergeAcrossProvince,
             FuzzyMergeDistance = options.FuzzyMergeDistance,
             EarlyEmitMinOcr = options.EarlyEmitMinOcr,
+            SpatialMergeIou = options.SpatialMergeIou,
+            SkipCharLevel = options.SkipCharLevel,
+            CandidateCount = options.CandidateCount,
         };
         _confirmer = new PlateConfirmer(MakeOpts());
         _obsConfirmer = new PlateConfirmer(MakeOpts());
@@ -343,6 +350,35 @@ public sealed class CameraWorker : IAsyncDisposable
         if (best.OcrConfidence < _options.EmitMinOcrConfidence) return;
         if (best.Confidence < _options.EmitMinConfidence) return;
 
+        // Varyant bastırma: aynı kapsamda kısa süre önce, bu plakayı ADAY olarak içeren bir emit
+        // olduysa bu YENİ olay değil aynı geçişin hayalet varyantıdır -> yayınlama (25DDS84 vakası).
+        var candSet = new HashSet<string>();
+        if (best.Candidates != null) foreach (var c in best.Candidates) candSet.Add(c.Compact);
+        if (_options.VariantSuppressSeconds > 0)
+        {
+            var window = TimeSpan.FromSeconds(_options.VariantSuppressSeconds);
+            _recentEmits.RemoveAll(r => now - r.At > window);
+            foreach (var r in _recentEmits)
+            {
+                if (r.Scope != scope) continue;
+                bool dup = r.Compact == compact || r.Candidates.Contains(compact) || candSet.Contains(r.Compact);
+                // Düşük güvenli yakın-varyant: eşik altı yeni okuma, az önceki YÜKSEK güvenli emitin
+                // ≤2 harf komşusuysa aynı geçişin bozuk kuyruğudur (25AEA791→25AEA181 vakası).
+                // Gerçek ikinci araç EarlyEmit sayesinde ya ≥eşik okunur ya bu düşük-güven yoluna düşmez.
+                if (!dup && best.OcrConfidence < _options.ManualReviewMinOcr && r.OcrConf >= 0.9f
+                    && Levenshtein(compact, r.Compact) <= 2)
+                    dup = true;
+                if (dup)
+                {
+                    _logger.LogInformation("[{Cam}] varyant bastırıldı: '{New}' (ocr={NewC:P0}) ~ önceki emit '{Old}' ({Ago:F0} sn önce)",
+                        _camera.Id, best.Text, best.OcrConfidence, r.Compact, (now - r.At).TotalSeconds);
+                    return;
+                }
+            }
+        }
+        _recentEmits.Add(new RecentEmit(now, compact, candSet, scope, best.OcrConfidence));
+        if (_recentEmits.Count > 32) _recentEmits.RemoveAt(0);
+
         var evt = new PlateEvent
         {
             Timestamp = now,
@@ -358,6 +394,7 @@ public sealed class CameraWorker : IAsyncDisposable
             Scope = scope,
             EvidencePath = evidence,
             LowConfidence = best.OcrConfidence < _options.ManualReviewMinOcr,
+            Candidates = best.Candidates,
         };
 
         EventsEmitted++;

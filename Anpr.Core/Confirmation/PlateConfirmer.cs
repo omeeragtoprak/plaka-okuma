@@ -52,6 +52,29 @@ public sealed class PlateConfirmerOptions
     /// Yüksek güvenli plakalar için gecikme eklemez. 0 = kapalı (eski davranış).
     /// </summary>
     public float EarlyEmitMinOcr { get; set; } = 0f;
+
+    /// <summary>
+    /// UZAMSAL iz birleştirme: metin-fuzzy eşleşme bulunamadığında, SON GÖRÜLMESİ SpatialMergeMaxGap
+    /// içinde olan ve kutusu okumanın kutusuyla en az bu IoU kadar çakışan iz aynı FİZİKSEL plaka
+    /// sayılıp birleştirilir (metin mesafesi SpatialMergeMaxDistance'a kadar). Aynı aracın çok farklı
+    /// yanlış-okuma varyantlarının (25DDS84 → 26ADD884, lev≥3) ayrı izlere bölünüp ÇOKLU emit
+    /// üretmesini keser; oylar tek havuzda toplanır, uzlaşı doğru plakayı verir. 0 = kapalı.
+    /// </summary>
+    public float SpatialMergeIou { get; set; } = 0.35f;
+
+    /// <summary>Uzamsal birleşme için izin son görülmesiyle okuma arasındaki azami süre (ardışık-kare bağı;
+    /// uzun tutulursa kapıda sıraya giren FARKLI araçlar birbirine zincirlenebilir).</summary>
+    public TimeSpan SpatialMergeMaxGap { get; set; } = TimeSpan.FromSeconds(1.5);
+
+    /// <summary>Uzamsal birleşmede tolere edilen azami metin mesafesi (sağlamlık sınırı).</summary>
+    public int SpatialMergeMaxDistance { get; set; } = 4;
+
+    /// <summary>SKIP_CHAR seviyesi (TrConstrainedDecoder): zayıf hayalet karakter slotunda "karakter yok"
+    /// hipotezini destekler. 0 = kapalı. Ölçümle açılır (öneri 0.5).</summary>
+    public float SkipCharLevel { get; set; } = 0f;
+
+    /// <summary>Uzlaşı emitinde üretilecek aday sayısı (top-K; whitelist toleransı + varyant bastırma). 0 = kapalı.</summary>
+    public int CandidateCount { get; set; } = 5;
 }
 
 /// <summary>
@@ -72,6 +95,7 @@ public sealed class PlateConfirmer
         public float[]? SlotSum;   // slots*vocab, kareler boyunca toplam
         public string? Alphabet;
         public int Slots;
+        public PlateBox LastBox;   // uzamsal iz birleştirme için son görülen kutu
         // Fuzzy modda bu izde görülen TÜM okuma varyantları (compact). Eşleşme yalnız Best.Text'e
         // yapılırsa Best geçiş sırasında kayar (drift) ve aynı araç ikinci ize bölünür → çift emit.
         public HashSet<string>? Variants;
@@ -94,6 +118,12 @@ public sealed class PlateConfirmer
             // izleridir (ölçülen vaka: 25AFB625 ←1→ 25AFB525 ←1→ 25AFB52, uçlar arası lev=2).
             // İzleri birleştir; oylamalar toplanır, konsensus doğru plakayı verir, çift emit biter.
             var matches = FindFuzzyMatches(reading, now);
+            if (matches.Count == 0 && _o.SpatialMergeIou > 0)
+            {
+                // Metin köprüsü yok ama kutu aynı yerde ve taze -> aynı FİZİKSEL plaka (ağır yanlış-okuma varyantı).
+                var spatial = FindSpatialMatch(reading, now);
+                if (spatial != null) matches.Add(spatial.Value);
+            }
             if (matches.Count == 0)
             {
                 key = Compact(reading.Text) + "#" + (_seq++);
@@ -128,6 +158,7 @@ public sealed class PlateConfirmer
 
         t.Count++;
         t.Last = now;
+        t.LastBox = reading.Box;
         if (reading.Confidence > t.Best.Confidence) t.Best = reading;
 
         if (_o.CharacterVoting && reading.SlotProbs is { Length: > 0 } sp && reading.OcrAlphabet is { Length: > 0 } alpha)
@@ -185,10 +216,21 @@ public sealed class PlateConfirmer
         string? normalized = null, rawCompact = null;
         float conf = t.Best.OcrConfidence;
 
+        IReadOnlyList<PlateCandidate>? candidates = null;
         if (_o.ConstrainedDecoding)
         {
-            var dec = TrConstrainedDecoder.Decode(mean, t.Alphabet, t.Slots);
+            var dec = TrConstrainedDecoder.Decode(mean, t.Alphabet, t.Slots, _o.SkipCharLevel);
             if (dec.Ok) { normalized = dec.Normalized; rawCompact = dec.Compact; conf = dec.Confidence; }
+            if (_o.CandidateCount > 0)
+            {
+                var top = TrConstrainedDecoder.DecodeTopK(mean, t.Alphabet, t.Slots, _o.CandidateCount, _o.SkipCharLevel);
+                if (top.Count > 0)
+                {
+                    var list = new List<PlateCandidate>(top.Count);
+                    foreach (var c in top) list.Add(new PlateCandidate(c.Compact, c.Confidence));
+                    candidates = list;
+                }
+            }
         }
 
         if (normalized == null)
@@ -215,6 +257,7 @@ public sealed class PlateConfirmer
             OcrConfidence = conf,
             Confidence = t.Best.DetectorConfidence * conf,
             IsValidTr = true,
+            Candidates = candidates,
         };
     }
 
@@ -225,6 +268,47 @@ public sealed class PlateConfirmer
         var parts = normalizedText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 3) return normalizedText;
         return _o.MergeAcrossProvince ? parts[1] + "|" + parts[2] : parts[0] + "|" + parts[1];
+    }
+
+    // Kutu-çakışmalı (aynı fiziksel plaka) iz araması: taze (≤SpatialMergeMaxGap) ve IoU eşiği geçen
+    // izlerden EN YÜKSEK IoU'lusu; sağlamlık için metin mesafesi SpatialMergeMaxDistance ile sınırlı.
+    private (string Key, Track Track, int Dist)? FindSpatialMatch(PlateReading reading, DateTimeOffset now)
+    {
+        if (reading.Box.Width <= 0) return null;
+        string rc = Compact(reading.Text);
+        (string, Track, int)? best = null;
+        float bestIou = 0f;
+        foreach (var kv in _tracks)
+        {
+            var t = kv.Value;
+            if (now - t.Last > _o.SpatialMergeMaxGap) continue;
+            if (t.LastBox.Width <= 0) continue;
+            float iou = Iou(t.LastBox, reading.Box);
+            if (iou < _o.SpatialMergeIou || iou <= bestIou) continue;
+            int d = Levenshtein(rc, Compact(t.Best.Text));
+            if (t.Variants is { } vars)
+                foreach (var v in vars)
+                {
+                    if (d <= 1) break;
+                    int dv = Levenshtein(rc, v);
+                    if (dv < d) d = dv;
+                }
+            if (d > _o.SpatialMergeMaxDistance) continue;
+            bestIou = iou;
+            best = (kv.Key, t, d);
+        }
+        return best;
+    }
+
+    private static float Iou(PlateBox a, PlateBox b)
+    {
+        int x1 = Math.Max(a.X, b.X), y1 = Math.Max(a.Y, b.Y);
+        int x2 = Math.Min(a.X + a.Width, b.X + b.Width), y2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
+        int iw = x2 - x1, ih = y2 - y1;
+        if (iw <= 0 || ih <= 0) return 0f;
+        float inter = iw * (float)ih;
+        float union = a.Width * (float)a.Height + b.Width * (float)b.Height - inter;
+        return union <= 0 ? 0f : inter / union;
     }
 
     // Aktif penceredeki (DedupWindow) izler arasında, okuması edit-mesafesi ≤ eşik olan TÜM izleri bul
@@ -257,7 +341,7 @@ public sealed class PlateConfirmer
     private static void MergeTracks(Track into, Track other)
     {
         into.Count += other.Count;
-        if (other.Last > into.Last) into.Last = other.Last;
+        if (other.Last > into.Last) { into.Last = other.Last; into.LastBox = other.LastBox; }
         if (other.Best.Confidence > into.Best.Confidence) into.Best = other.Best;
         into.Emitted |= other.Emitted;
         if (other.SlotSum != null)

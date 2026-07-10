@@ -47,6 +47,18 @@ public sealed record PlateReading
     /// </summary>
     public bool InZone { get; init; } = true;
 
+    /// <summary>
+    /// Uzlaşı çözümlemesinin en iyi K GEÇERLİ adayı (skora göre; ilki Text ile aynı). Whitelist
+    /// toleransı + emit-sonrası varyant bastırma için. Yalnız kısıtlı-çözümlemeli uzlaşı emitlerinde dolu.
+    /// </summary>
+    public IReadOnlyList<PlateCandidate>? Candidates { get; init; }
+
     public override string ToString() =>
         $"{Text} (conf={Confidence:F2}, det={DetectorConfidence:F2}, ocr={OcrConfidence:F2}, tr={IsValidTr})";
+}
+
+/// <summary>Alternatif plaka okuması adayı (boşluksuz metin + güven).</summary>
+public sealed record PlateCandidate(string Compact, float Confidence)
+{
+    public override string ToString() => $"{Compact}:{Confidence:F2}";
 }

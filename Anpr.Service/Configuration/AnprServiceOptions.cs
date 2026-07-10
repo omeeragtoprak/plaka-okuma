@@ -115,6 +115,23 @@ public sealed class AnprServiceOptions
     /// <summary>OCR öncesi plaka deskew (eğiklik düzeltme). Açılı veride ÖLÇÜLMELİ. Varsayılan kapalı.</summary>
     public bool DeskewPlates { get; set; } = false;
 
+    /// <summary>Uzamsal iz birleştirme IoU eşiği (aynı fiziksel plaka, ağır varyantlar tek ize). 0 = kapalı.</summary>
+    public float SpatialMergeIou { get; set; } = 0.35f;
+
+    /// <summary>SKIP_CHAR seviyesi: hayalet son hane bastırma (TrConstrainedDecoder). 0 = kapalı.
+    /// ÖLÇÜM (diag4): 0.5 bir birebiri kaybettirdi (agresif); 0.3 birebiri koruyup mekanizmayı açık tutuyor.</summary>
+    public float SkipCharLevel { get; set; } = 0.3f;
+
+    /// <summary>Uzlaşı emitinde taşınacak aday sayısı (top-K). 0 = kapalı.</summary>
+    public int CandidateCount { get; set; } = 5;
+
+    /// <summary>
+    /// Emit-sonrası varyant bastırma penceresi (sn): yeni emitin plakası, aynı kameranın/kapsamın son
+    /// emitlerinden birinin ADAY listesinde geçiyorsa (veya birebir aynıysa) yeni OLAY yayınlanmaz —
+    /// aynı geçişin farklı-uzunluk hayalet varyantları tek olaya iner. 0 = kapalı.
+    /// </summary>
+    public int VariantSuppressSeconds { get; set; } = 30;
+
     /// <summary>
     /// Gözlem OCR bütçesi: ROI DIŞI tespitlerden kare başına en fazla bu kadarı (en büyükten) okunur ve
     /// Scope="gozlem" olayı olarak yayınlanır (bariyer kararına girmez; panelde kamerayla eşleşir).

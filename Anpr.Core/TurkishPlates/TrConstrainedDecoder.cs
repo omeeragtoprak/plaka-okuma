@@ -26,6 +26,20 @@ public static class TrConstrainedDecoder
     };
 
     public static TrConstrainedResult Decode(float[] slotProbs, string alphabet, int slots)
+        => Decode(slotProbs, alphabet, slots, skipCharLevel: 0f);
+
+    /// <summary>
+    /// skipCharLevel > 0: OpenALPR'ın SKIP_CHAR fikri — bir slotun en güçlü karakter olasılığı bu
+    /// eşiğin ALTINDAysa, o slot için "karakter yok" (pad) hipotezi max(p_pad, skipLevel - p_topChar)
+    /// tabanıyla güçlendirilir. Plaka kenarı artefaktlarının ürettiği hayalet son haneyi (24ACB27_
+    /// vakası) kısa-uzunluk kombinasyonunun kazanmasına izin vererek düşürür. 0 = kapalı.
+    /// </summary>
+    public static TrConstrainedResult Decode(float[] slotProbs, string alphabet, int slots, float skipCharLevel)
+        => Decode(slotProbs, alphabet, slots, skipCharLevel, collector: null);
+
+    private static TrConstrainedResult Decode(
+        float[] slotProbs, string alphabet, int slots, float skipCharLevel,
+        Action<double, TrConstrainedResult>? collector)
     {
         int vocab = alphabet.Length;
         if (vocab == 0 || slots < 5 || slotProbs.Length < slots * vocab) return TrConstrainedResult.Invalid;
@@ -44,6 +58,24 @@ public static class TrConstrainedDecoder
         foreach (var d in digitIdx) if (d < 0) return TrConstrainedResult.Invalid;
 
         double LogP(int slot, int idx) => Math.Log(slotProbs[slot * vocab + idx] + 1e-6);
+
+        // Pad (karakter yok) hipotezinin etkin log-olasılığı. skipCharLevel açıkken: slottaki EN GÜÇLÜ
+        // pad-dışı karakter eşiğin ALTINDAysa, "burada karakter yok" hipotezi en az skipCharLevel
+        // olasılığında sayılır — kenar artefaktının ürettiği eşik-altı hayalet hane, kısa-uzunluk
+        // kombinasyonuna yenilir. Eşik ÜSTÜ karakter kanıtı varsa taban devreye girmez (temiz plaka etkilenmez).
+        double PadLogP(int slot)
+        {
+            double padP = slotProbs[slot * vocab + padIdx];
+            if (skipCharLevel > 0f && padP < skipCharLevel)
+            {
+                float top = 0f;
+                int start = slot * vocab;
+                for (int c = 0; c < vocab; c++)
+                    if (c != padIdx && slotProbs[start + c] > top) top = slotProbs[start + c];
+                if (top < skipCharLevel) padP = skipCharLevel;
+            }
+            return Math.Log(padP + 1e-6);
+        }
 
         // İl (slot 0,1): 01-81 aralığında en yüksek olasılıklı rakam çifti.
         double provScore = double.NegativeInfinity; int bd0 = 0, bd1 = 1;
@@ -96,18 +128,42 @@ public static class TrConstrainedDecoder
             }
 
             // Kalan slotlar pad olmalı — pad olasılığı skora katılır (doğru uzunluğu ödüllendirir).
+            // SKIP_CHAR: zayıf hayalet karakterli slotta pad hipotezi desteklenir (PadLogP).
             for (int slot = used; slot < slots; slot++)
-                score += LogP(slot, padIdx);
+                score += PadLogP(slot);
+
+            int nonPad = 2 + L + D;
+            float conf = (float)Math.Exp(nonPadLogSum / nonPad); // geometrik ortalama olasılık
+            var result = new TrConstrainedResult(true, $"{bd0}{bd1}", new string(letters), new string(numbers), conf);
+            collector?.Invoke(score, result);
 
             if (score > bestTotal)
             {
                 bestTotal = score;
-                int nonPad = 2 + L + D;
-                float conf = (float)Math.Exp(nonPadLogSum / nonPad); // geometrik ortalama olasılık
-                best = new TrConstrainedResult(true, $"{bd0}{bd1}", new string(letters), new string(numbers), conf);
+                best = result;
             }
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// En iyi K GEÇERLİ aday (skora göre sıralı; ilk eleman Decode ile aynıdır). Her TR uzunluk
+    /// kombinasyonunun en olası dizilimi bir adaydır — whitelist toleransı ve emit-sonrası
+    /// varyant bastırma (aynı aracın farklı-uzunluk yanlış okumaları) için kullanılır.
+    /// </summary>
+    public static IReadOnlyList<TrConstrainedResult> DecodeTopK(
+        float[] slotProbs, string alphabet, int slots, int k, float skipCharLevel = 0f)
+    {
+        var all = new List<(double Score, TrConstrainedResult R)>();
+        Decode(slotProbs, alphabet, slots, skipCharLevel, (s, r) => all.Add((s, r)));
+        all.Sort((a, b) => b.Score.CompareTo(a.Score));
+        var list = new List<TrConstrainedResult>(Math.Min(k, all.Count));
+        foreach (var (_, r) in all)
+        {
+            if (list.Count >= k) break;
+            if (!list.Exists(x => x.Compact == r.Compact)) list.Add(r);
+        }
+        return list;
     }
 }

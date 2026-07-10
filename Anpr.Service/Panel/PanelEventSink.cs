@@ -21,6 +21,8 @@ public sealed class PanelEventSink : IEventSink
             timeIso = e.Timestamp.ToLocalTime().ToString("o"),
             conf = Math.Round(e.OcrConfidence, 2),
             ev = e.EvidencePath,
+            lowConf = e.LowConfidence,
+            cands = e.Candidates == null ? null : string.Join(" ", e.Candidates.Select(c => c.Compact)),
             box = new { x = e.Box.X, y = e.Box.Y, w = e.Box.Width, h = e.Box.Height },
         });
         return Task.CompletedTask;
