@@ -98,33 +98,78 @@ public sealed class AnprEngine : IDisposable
     public IReadOnlyList<(PlateReading Reading, SKBitmap Crop)> RecognizeWithCrops(SKBitmap image)
         => RecognizeCore(image, wantCrops: true);
 
+    private int _frameTick; // ROI-kırpım modunda tam-kare gözlem taraması sayacı (kamera başına motor = tek thread)
+
     // Ortak boru hattı: tespit -> (bölge içi hepsi + bölge dışı en büyük N "gözlem") -> kırp -> OCR.
+    // ROI-kırpım modu: ana tespit ROI sınırlayıcı dikdörtgeninde koşar (plakalar dedektör girdisinde
+    // büyür); gözlem için tam kare FullFrameEveryN karede bir ayrıca taranır.
     private List<(PlateReading Reading, SKBitmap Crop)> RecognizeCore(SKBitmap image, bool wantCrops)
     {
         ArgumentNullException.ThrowIfNull(image);
 
-        var detections = _detector.Detect(image);
-        var results = new List<(PlateReading, SKBitmap)>(detections.Count);
+        var roi = _roi;
+        int W = image.Width, H = image.Height;
 
-        int minPlateW = (int)(image.Width * _options.MinPlateWidthRatio);
-        List<PlateDetection>? outOfZone = null;
-
-        foreach (var det in detections)
+        (int X, int Y, int Wd, int Ht)? cropRect = null;
+        if (roi != null && _options.RoiCropDetector)
         {
-            // OCR'ı yalnızca MinConfidence üstündeki tespitlere uygula (CPU tasarrufu).
-            if (det.Confidence < _options.MinConfidence) continue;
-            // Tetik bölgesi: çok küçük/uzak plakalara OCR yapma.
-            if (det.Width < minPlateW) continue;
-
-            if (!InRoi(det, image.Width, image.Height))
-            {
-                // ROI dışı: gözlem bütçesi varsa aday listesine al (aşağıda en büyükler okunur).
-                if (_options.ObservationMaxPerFrame > 0) (outOfZone ??= new()).Add(det);
-                continue;
-            }
-
-            RecognizeOne(image, det, inZone: true, wantCrops, results);
+            var (rx, ry, rw, rh) = roi.BoundingRectPixels(W, H);
+            // ROI neredeyse tam kareyse kırpımın kazancı yok — tam-kare yoluna düş.
+            if ((long)rw * rh < 0.90 * (long)W * H) cropRect = (rx, ry, rw, rh);
         }
+
+        IReadOnlyList<PlateDetection> zoneDets;
+        List<PlateDetection>? outOfZone = null;
+        int minPlateW = (int)(W * _options.MinPlateWidthRatio);
+
+        bool Eligible(PlateDetection d) => d.Confidence >= _options.MinConfidence && d.Width >= minPlateW;
+
+        if (cropRect is { } cr)
+        {
+            using var sub = SkiaImaging.ExtractSubset(image, new SKRectI(cr.X, cr.Y, cr.X + cr.Wd, cr.Y + cr.Ht));
+            var dets = _detector.Detect(sub);
+            var mapped = new List<PlateDetection>(dets.Count);
+            foreach (var d in dets)
+                mapped.Add(d with { X = d.X + cr.X, Y = d.Y + cr.Y }); // tam-kare koordinatlarına taşı
+
+            bool fullFrameTurn = _options.ObservationMaxPerFrame > 0 &&
+                                 (++_frameTick % Math.Max(1, _options.FullFrameEveryN) == 0);
+
+            var zone = new List<PlateDetection>();
+            foreach (var d in mapped)
+            {
+                if (!Eligible(d)) continue;
+                if (InRoi(d, W, H)) zone.Add(d);
+                else if (!fullFrameTurn && _options.ObservationMaxPerFrame > 0) (outOfZone ??= new()).Add(d);
+            }
+            zoneDets = zone;
+
+            if (fullFrameTurn)
+            {
+                // Tam-kare gözlem taraması: yalnız ROI dışındakiler (bölge içi zaten kırpım geçişinde).
+                foreach (var d in _detector.Detect(image))
+                {
+                    if (!Eligible(d)) continue;
+                    if (!InRoi(d, W, H)) (outOfZone ??= new()).Add(d);
+                }
+            }
+        }
+        else
+        {
+            var dets = _detector.Detect(image);
+            var zone = new List<PlateDetection>(dets.Count);
+            foreach (var d in dets)
+            {
+                if (!Eligible(d)) continue;
+                if (InRoi(d, W, H)) zone.Add(d);
+                else if (_options.ObservationMaxPerFrame > 0) (outOfZone ??= new()).Add(d);
+            }
+            zoneDets = zone;
+        }
+
+        var results = new List<(PlateReading, SKBitmap)>(zoneDets.Count + 2);
+        foreach (var det in zoneDets)
+            RecognizeOne(image, det, inZone: true, wantCrops, results);
 
         if (outOfZone != null)
         {

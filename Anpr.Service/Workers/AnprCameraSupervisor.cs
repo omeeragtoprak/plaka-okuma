@@ -81,6 +81,8 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                     MinPlateWidthRatio = _options.MinPlateWidthRatio,
                     DeskewPlates = _options.DeskewPlates,
                     ObservationMaxPerFrame = _options.ObservationMaxPerFrame,
+                    RoiCropDetector = _options.RoiCropDetector,
+                    FullFrameEveryN = _options.FullFrameEveryN,
                     RoiPolygon = new Anpr.Service.Panel.RoiStore().LoadOrDefault(cam.Id, cam.Roi),
                 };
 

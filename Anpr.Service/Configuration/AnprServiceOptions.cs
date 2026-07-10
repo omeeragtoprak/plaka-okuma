@@ -115,6 +115,12 @@ public sealed class AnprServiceOptions
     /// <summary>OCR öncesi plaka deskew (eğiklik düzeltme). Açılı veride ÖLÇÜLMELİ. Varsayılan kapalı.</summary>
     public bool DeskewPlates { get; set; } = false;
 
+    /// <summary>ROI-kırpımlı tespit: dedektöre ROI sınırlayıcı dikdörtgeni verilir (plaka pikseli büyür). </summary>
+    public bool RoiCropDetector { get; set; } = true;
+
+    /// <summary>ROI-kırpım modunda tam-kare gözlem taraması sıklığı (her N karede 1).</summary>
+    public int FullFrameEveryN { get; set; } = 3;
+
     /// <summary>Uzamsal iz birleştirme IoU eşiği (aynı fiziksel plaka, ağır varyantlar tek ize). 0 = kapalı.</summary>
     public float SpatialMergeIou { get; set; } = 0.35f;
 

@@ -32,3 +32,23 @@ public class RoiPolygonTests
         Assert.False(roi.ContainsPixel(150, 1400, 2688, 1520));  // sol-alt dışı (~56,921)
     }
 }
+
+public class RoiBoundingRectTests
+{
+    [Fact]
+    public void Bounding_rect_covers_polygon_with_pad_and_clamps()
+    {
+        var roi = Anpr.Core.Imaging.RoiPolygon.Parse("100,200;900,200;900,800;100,800")!;
+        var (x, y, w, h) = roi.BoundingRectPixels(1000, 1000, padRatio: 0.05f);
+        // %5 pay: 100-40=60 .. 900+40=940
+        Assert.True(x <= 100 * 1000 / 1000 && x >= 0);
+        Assert.Equal(60, x); Assert.Equal(170, y);
+        Assert.Equal(880, w); Assert.Equal(660, h);
+
+        // Kenara taşan çokgen kareye kırpılır
+        var edge = Anpr.Core.Imaging.RoiPolygon.Parse("0,0;1000,0;1000,1000;0,1000")!;
+        var (ex, ey, ew, eh) = edge.BoundingRectPixels(2688, 1520);
+        Assert.Equal(0, ex); Assert.Equal(0, ey);
+        Assert.Equal(2688, ew); Assert.Equal(1520, eh);
+    }
+}

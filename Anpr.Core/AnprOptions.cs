@@ -64,6 +64,17 @@ public sealed class AnprOptions
     public bool DeskewPlates { get; set; } = false;
 
     /// <summary>
+    /// ROI-kırpımlı tespit: ROI tanımlıysa dedektöre tam kare yerine ROI'nin sınırlayıcı dikdörtgeni
+    /// (+%5 pay) verilir → letterbox gri-dolgu israfı geri kazanılır, plakalar dedektör girdisinde büyür
+    /// (mevcut çıkış ROI'sinde ×1.35). ROI kare boyutunun ≥%90'ıysa kazanç yok → otomatik tam-kare yolu.
+    /// Gözlem katmanı için tam kare FullFrameEveryN karede bir ayrıca taranır.
+    /// </summary>
+    public bool RoiCropDetector { get; set; } = true;
+
+    /// <summary>ROI-kırpım modunda tam-kare gözlem taraması sıklığı (her N karede 1). Min 1.</summary>
+    public int FullFrameEveryN { get; set; } = 3;
+
+    /// <summary>
     /// Gözlem OCR bütçesi: ROI DIŞI tespitlerden kare başına en fazla bu kadarına (en büyükten başlayarak)
     /// OCR uygulanır ve okumalar InZone=false etiketiyle döner. Kameranın kapsam-dışı (cadde/uzak)
     /// okumalarıyla panelde eşleşebilmek için; bariyer kararına girmez. 0 = kapalı (eski davranış).

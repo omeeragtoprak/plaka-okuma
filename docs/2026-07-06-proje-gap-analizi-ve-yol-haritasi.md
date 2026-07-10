@@ -208,3 +208,30 @@ fuzzy birleşme köprü kuramadı; her iz 2 onayla erken emit oldu. Çözüm pak
 Regresyon: live1h 87/101 recall + emit sayıları özellikler açık/kapalı BİREBİR AYNI (nötr);
 diag4 gürültü −%21; 60/60 birim test. Not: eski "31 yanlış-emit" referansı farklı bayraklı koşuymuş —
 güncel taban 34; bataryaya bayraklar sabitlendi (`--spatialiou --skipchar`).
+
+## 5f. Güncelleme (2026-07-10 öğleden sonra): Backlog turu — 2 kazanım, 2 dürüst eleme, 1 kapanış
+
+**ROI-kırpımlı tespit (KAZANIM, canlıda):** ROI tanımlıysa dedektöre tam kare yerine ROI sınırlayıcı
+dikdörtgeni (+%5 pay) verilir; letterbox gri-dolgu israfı geri kazanılır (mevcut çıkış ROI'sinde plaka
+pikseli ×1.35). ROI ≥ kare %90'ıysa otomatik tam-kare yolu. Gözlem katmanı için tam kare 3 karede bir
+ayrıca taranır (`RoiCropDetector`, `FullFrameEveryN`). diag4+ROI duman testi temiz; koordinatlar
+tam-kareye doğru eşlenir (61/61 test).
+
+**ORT 1.20.1 → 1.23.2 (KAZANIM, tutuldu):** doğruluk birebir aynı (diag4 22/26 + gürültü 11; live1h
+87/101), gecikme nötr (33.9 vs 32.8 ms/kare). Daha güncel runtime + AlprNet ile kanıtlı uyum.
+
+**Fine-tune v3 (ELENDİ — değerli negatif):** perspektif+shear (+gece profili +320 dedektör-onaylı
+arka-plan negatifi) augmentation'la 35 epoch: val %76.2 vs v2'nin %76.4 (BERABERE), gece %83.2 vs
+%82.4 (berabere), SENTETİK açı testinde bile fark yok (%47.4 vs %48.0 — kendi eğitim dağılımına
+rağmen!). Ayrıca v2_erz'nin negatif-reddi ZATEN %100 (global modelin boş-plaka eğitimi taşınmış).
+Karar: v2_erz kalır; v3 arşivde (`models/cct_xs_v3_erz.onnx`). Ders: bu model boyutunda (64×128
+stretch girişli cct-xs) augmentation açı dayanıklılığı SATIN ALMIYOR — açılı plaka için umut
+rektifikasyon (WPOD) ve daha çok GERÇEK açılı veri.
+
+**INT8 (YENİDEN ELENDİ):** ORT 1.23.2'de de ConvInteger CPU implementasyonu yok
+("NotImplemented: ConvInteger(10)"). Hedef PC'de yol: OpenVINO EP veya statik QDQ.
+
+**Varyant bastırma geçmiş doğrulaması:** dün (eski kod) varyant-zincirli geçiş %24.1 (165/684);
+bugün deploy sonrası %16.3 (16/98) — üçte bir azalma; bastırma logları hedefte (25ADR78~25ADN783,
+25ACC991~25ADL991, güven 0.50 çöpler). Kalan zincirlerin bir kısmı metrik artefaktı (≤3-lev kümeleme
+alakasız plakaları da sayıyor).
