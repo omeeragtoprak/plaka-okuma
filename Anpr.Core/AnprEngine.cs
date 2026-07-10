@@ -183,6 +183,10 @@ public sealed class AnprEngine : IDisposable
         return results;
     }
 
+    /// <summary>Kalite kapısının OCR öncesi elediği kırpıntı sayısı (sağlık/izleme).</summary>
+    public long QualityDroppedCount => Interlocked.Read(ref _qualityDropped);
+    private long _qualityDropped;
+
     private void RecognizeOne(SKBitmap image, PlateDetection det, bool inZone, bool wantCrops,
         List<(PlateReading, SKBitmap)> results)
     {
@@ -190,6 +194,19 @@ public sealed class AnprEngine : IDisposable
         if (rect.Width < 2 || rect.Height < 2) return;
 
         using var crop = SkiaImaging.ExtractSubset(image, rect);
+
+        // Kalite kapısı: bulanık / aşırı karanlık / patlamış kırpıntı OCR'a girmez (oylamayı kirletmez).
+        if (_options.CropQualityGate)
+        {
+            var q = CropQualityScorer.Score(crop);
+            if ((_options.QualityBlurMin > 0 && q.BlurVar < _options.QualityBlurMin) ||
+                q.DarkPct > _options.QualityDarkMaxPct ||
+                q.BrightPct > _options.QualityBrightMaxPct)
+            {
+                Interlocked.Increment(ref _qualityDropped);
+                return;
+            }
+        }
         SKBitmap? deskewed = null;
         if (_options.DeskewPlates)
         {

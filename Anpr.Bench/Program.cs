@@ -28,6 +28,7 @@ switch (mode)
     case "vscamera": RunVsCamera(args[1], args[2], args[3], double.Parse(args[4], CultureInfo.InvariantCulture), opt); break;
     case "emitsim": RunEmitSim(args[1], opt); break;
     case "harvest": RunHarvest(args[1], args[2], opt); break;
+    case "qscore": RunQScore(args[1], args.Length > 2 ? args[2] : "qscore.csv"); break;
     default: Usage(); break;
 }
 return;
@@ -234,6 +235,35 @@ void RunFuseTest(string datasetDir, string labelsPath, BenchOptions o)
     }
 
     Console.WriteLine($"--- TEK-kare en iyi: {singleOk}/{cars.Count} | ÇOK-KARELİ FÜZYON: {fusedOk}/{cars.Count} ---");
+}
+
+// ---------------------------------------------------------------- QSCORE
+// Kalite skoru dökümü: CSV'deki (image_path,plate_text) kırpıntıların C# CropQualityScorer
+// skorlarını yazar — eşik taraması C# ölçeğiyle yapılsın diye (python/C# tutarlılığı).
+void RunQScore(string csvPath, string outPath)
+{
+    string baseDir = Path.GetDirectoryName(Path.GetFullPath(csvPath)) ?? ".";
+    using var w = new StreamWriter(outPath);
+    w.WriteLine("image_path,blur,dark_pct,bright_pct,mean_gray");
+    int n = 0;
+    foreach (var line in File.ReadLines(csvPath).Skip(1))
+    {
+        int comma = line.LastIndexOf(',');
+        if (comma <= 0) continue;
+        string p = line[..comma];
+        if (!Path.IsPathRooted(p)) p = Path.GetFullPath(Path.Combine(baseDir, p));
+        if (!File.Exists(p)) continue;
+        using var raw = SkiaSharp.SKBitmap.Decode(p);
+        if (raw == null) continue;
+        using var bmp = raw.ColorType == SkiaSharp.SKColorType.Rgba8888
+            ? raw.Copy(SkiaSharp.SKColorType.Rgba8888)
+            : raw.Copy(SkiaSharp.SKColorType.Rgba8888);
+        var q = Anpr.Core.Imaging.CropQualityScorer.Score(bmp);
+        w.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"{p},{q.BlurVar:F1},{q.DarkPct:F4},{q.BrightPct:F4},{q.MeanGray:F1}"));
+        n++;
+    }
+    Console.WriteLine($"qscore: {n} kırpıntı -> {outPath}");
 }
 
 // ---------------------------------------------------------------- HARVEST
@@ -474,6 +504,10 @@ AnprEngine MakeEngine(BenchOptions o) => AnprEngine.Create(new AnprOptions
     DeskewPlates = o.Deskew,
     MinPlateWidthRatio = o.MinPlateW,
     RoiPolygon = o.Roi,
+    CropQualityGate = o.QualityBlurMin > 0 || o.QualityDarkMax < 1 || o.QualityBrightMax < 1,
+    QualityBlurMin = o.QualityBlurMin,
+    QualityDarkMaxPct = o.QualityDarkMax,
+    QualityBrightMaxPct = o.QualityBrightMax,
 });
 
 static IReadOnlyList<PlateReading> SafeRecognize(AnprEngine e, string path)
@@ -580,6 +614,9 @@ BenchOptions ParseArgs(string[] a)
         EarlyEmit = float.Parse(ArgVal(a, "--earlyemit") ?? "0", CultureInfo.InvariantCulture),
         SpatialIou = float.Parse(ArgVal(a, "--spatialiou") ?? "0", CultureInfo.InvariantCulture),
         SkipChar = float.Parse(ArgVal(a, "--skipchar") ?? "0", CultureInfo.InvariantCulture),
+        QualityBlurMin = float.Parse(ArgVal(a, "--qblur") ?? "0", CultureInfo.InvariantCulture),
+        QualityDarkMax = float.Parse(ArgVal(a, "--qdark") ?? "1", CultureInfo.InvariantCulture),
+        QualityBrightMax = float.Parse(ArgVal(a, "--qbright") ?? "1", CultureInfo.InvariantCulture),
         Trace = (ArgVal(a, "--trace") ?? "").ToUpperInvariant(),
         CharVote = (ArgVal(a, "--charvote") ?? "true") != "false",
         Deskew = (ArgVal(a, "--deskew") ?? "false") == "true",
@@ -617,6 +654,9 @@ sealed class BenchOptions
     public float EarlyEmit = 0;
     public float SpatialIou = 0;   // uzamsal iz birleştirme (0=kapalı, baseline)
     public float SkipChar = 0;     // SKIP_CHAR seviyesi (0=kapalı, baseline)
+    public float QualityBlurMin = 0;  // kalite kapısı (0=kapalı)
+    public float QualityDarkMax = 1;
+    public float QualityBrightMax = 1;
     public string Trace = "";
     public string Roi = "";
     public float MinConf, MinOcr;

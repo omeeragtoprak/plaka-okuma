@@ -83,6 +83,10 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                     ObservationMaxPerFrame = _options.ObservationMaxPerFrame,
                     RoiCropDetector = _options.RoiCropDetector,
                     FullFrameEveryN = _options.FullFrameEveryN,
+                    CropQualityGate = _options.CropQualityGate,
+                    QualityBlurMin = _options.QualityBlurMin,
+                    QualityDarkMaxPct = _options.QualityDarkMaxPct,
+                    QualityBrightMaxPct = _options.QualityBrightMaxPct,
                     RoiPolygon = new Anpr.Service.Panel.RoiStore().LoadOrDefault(cam.Id, cam.Roi),
                 };
 

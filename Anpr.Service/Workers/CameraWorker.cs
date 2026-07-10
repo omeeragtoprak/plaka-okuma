@@ -59,6 +59,8 @@ public sealed class CameraWorker : IAsyncDisposable
     public byte[]? PeekSourceFrame() => _frameSource.TryGetLatestFrame();
     public IReadOnlyList<PlateBox> LastBoxes => _lastBoxes ?? Array.Empty<PlateBox>();
     public string CurrentRoi => _engine.RoiSpec;
+    /// <summary>Kalite kapısının OCR öncesi elediği kırpıntı sayısı (sağlık).</summary>
+    public long QualityDropped => _engine.QualityDroppedCount;
     public void ApplyRoi(string? spec) => _engine.SetRoi(spec);
     public DateTimeOffset? LastEventUtc { get; private set; }
     public string? LastPlate { get; private set; }

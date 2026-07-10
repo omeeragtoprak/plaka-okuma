@@ -235,3 +235,23 @@ rektifikasyon (WPOD) ve daha çok GERÇEK açılı veri.
 bugün deploy sonrası %16.3 (16/98) — üçte bir azalma; bastırma logları hedefte (25ADR78~25ADN783,
 25ACC991~25ADL991, güven 0.50 çöpler). Kalan zincirlerin bir kısmı metrik artefaktı (≤3-lev kümeleme
 alakasız plakaları da sayıyor).
+
+## 5g. Güncelleme (2026-07-10 akşam): İkinci-Şans Şeridi Faz 0-1 — kalite kapısı CANLIDA
+
+Spec/plan: `docs/superpowers/specs+plans/2026-07-10-kirpinti-goruntu-isleme-*`. 
+
+**Faz 0 (ölçüm altyapısı):** `make_slices.py` — 625 etiketli kırpıntı WPOD-quad eğiklik metriğiyle
+otomatik dilimlendi (açılı 86 / karanlık 126 / küçük 41; etiketler gözle doğrulandı: 48° etiketli
+kırpıntı bariz eğik ve açı-kaynaklı yanlış okumalı, 0.12° tam cephe). Bench `qscore` modu +
+`--qblur/--qdark/--qbright` bayrakları (C# skoru = kalibrasyon ölçeği; python/C# aynı matematik).
+
+**Faz 1 (kalite kapısı) — KAPIYI GEÇTİ, CANLIDA:** `CropQualityScorer` (gri Laplacian varyansı +
+histogram uçları, ~0.1 ms). Eşik kalibrasyonu iki katmanlı: (a) etiketli gerçek-değer (625 kırpıntı)
+— 300 altı eşikler SIFIR doğru okuma kaybediyor (set seçim-yanlı: zaten iyi kırpıntılar);
+(b) üretim popülasyonu (2.730 kanıt kırpıntısı, güven-proxy) — 600 eşiği iyilerin (%≥0.95 güven)
+yalnız %0.3'üne dokunup çöp-proxy'nin (%<0.60) %17.4'ünü eliyor. Batarya: **diag4 birebir 22/26
+KORUNDU, gürültü 11→9; live1h birebir aynı (87/101)**; 64/64 test (3 yeni sentetik-fixture testi —
+KVKK: plaka görüntüsü repoya girmez). Yapılandırma: `CropQualityGate=true, QualityBlurMin=600,
+QualityDarkMaxPct=0.85, QualityBrightMaxPct=0.80`; sağlıkta `qualityDropped` sayacı.
+
+Sıradaki: Faz 2 — WPOD kapılı rektifikasyon (iz-içi, `InjectObservation`).

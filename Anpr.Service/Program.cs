@@ -86,6 +86,7 @@ app.MapGet("/health", (AnprCameraSupervisor sup) =>
         lastFrameUtc = w.LastFrameUtc,
         framesReceived = w.FramesReceived,
         framesProcessed = w.FramesProcessed,
+        qualityDropped = w.QualityDropped,
         restartCount = w.RestartCount,
         eventsEmitted = w.EventsEmitted,
         lastEventUtc = w.LastEventUtc,

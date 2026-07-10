@@ -121,6 +121,13 @@ public sealed class AnprServiceOptions
     /// <summary>ROI-kırpım modunda tam-kare gözlem taraması sıklığı (her N karede 1).</summary>
     public int FullFrameEveryN { get; set; } = 3;
 
+    /// <summary>Kalite kapısı: bulanık/aşırı karanlık/patlamış kırpıntı OCR'a girmez (oylamayı kirletmez).
+    /// ÖLÇÜM (2026-07-10): blur=600 eşiğiyle diag4 birebir korunup gürültü 11→9; live1h recall sabit.</summary>
+    public bool CropQualityGate { get; set; } = true;
+    public float QualityBlurMin { get; set; } = 600f;
+    public float QualityDarkMaxPct { get; set; } = 0.85f;
+    public float QualityBrightMaxPct { get; set; } = 0.80f;
+
     /// <summary>Uzamsal iz birleştirme IoU eşiği (aynı fiziksel plaka, ağır varyantlar tek ize). 0 = kapalı.</summary>
     public float SpatialMergeIou { get; set; } = 0.35f;
 

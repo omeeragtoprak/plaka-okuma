@@ -75,6 +75,22 @@ public sealed class AnprOptions
     public int FullFrameEveryN { get; set; } = 3;
 
     /// <summary>
+    /// Kalite kapısı (İkinci-Şans Şeridi Aşama 1): açıkken, bulanıklık varyansı QualityBlurMin
+    /// altındaki YA DA karanlık/patlamış piksel oranı eşiği aşan kırpıntılar OCR'a girmez
+    /// (oylamayı kirletmez). Eşikler eşik-taramasıyla seçilir; ölçüm kapısını geçmeden AÇILMAZ.
+    /// </summary>
+    public bool CropQualityGate { get; set; } = false;
+
+    /// <summary>Bulanıklık alt eşiği (gri Laplacian varyansı; altı = bulanık, atılır). 0 = devre dışı.</summary>
+    public float QualityBlurMin { get; set; } = 0f;
+
+    /// <summary>Karanlık piksel (gri&lt;30) oranı üst eşiği; üstü atılır. 1 = devre dışı.</summary>
+    public float QualityDarkMaxPct { get; set; } = 1f;
+
+    /// <summary>Patlamış piksel (gri&gt;225) oranı üst eşiği; üstü atılır (IR patlaması). 1 = devre dışı.</summary>
+    public float QualityBrightMaxPct { get; set; } = 1f;
+
+    /// <summary>
     /// Gözlem OCR bütçesi: ROI DIŞI tespitlerden kare başına en fazla bu kadarına (en büyükten başlayarak)
     /// OCR uygulanır ve okumalar InZone=false etiketiyle döner. Kameranın kapsam-dışı (cadde/uzak)
     /// okumalarıyla panelde eşleşebilmek için; bariyer kararına girmez. 0 = kapalı (eski davranış).
