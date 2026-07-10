@@ -195,7 +195,9 @@ public sealed class CameraWorker : IAsyncDisposable
     // kötü bir rektifikasyon çıktısı oylamada azınlıkta kalır (deskew-faciası yapısal engelli).
     private void EnhancePendingTracks(DateTimeOffset now)
     {
-        if (!_options.EnhanceRectify || !_engine.RectifierAvailable) return;
+        bool anyStage = (_options.EnhanceRectify && _engine.RectifierAvailable)
+                     || (_options.EnhanceSr && _engine.SuperResolverAvailable);
+        if (!anyStage) return;
 
         var pending = _confirmer.PendingLowConf(now, _options.EnhanceTriggerOcr);
         if (pending.Count == 0) return;
@@ -215,14 +217,37 @@ public sealed class CameraWorker : IAsyncDisposable
             foreach (var (bmp, _) in top)
             {
                 if (sw.ElapsedMilliseconds > _options.EnhanceBudgetMs) break;
-                var rect = _engine.TryRectify(bmp);
-                if (rect == null) continue;
-                using var rimg = rect.Value.Image;
-                var reading = _engine.ReadCrop(rimg, consensus.DetectorConfidence, consensus.Box);
-                if (reading is { IsValidTr: true })
+
+                // Aşama 2: rektifikasyon (ölçüm: her dilimde kazanç)
+                if (_engine.RectifierAvailable)
                 {
-                    _confirmer.InjectObservation(key, reading with { InZone = true });
-                    injected++;
+                    var rect = _engine.TryRectify(bmp);
+                    if (rect != null)
+                    {
+                        using var rimg = rect.Value.Image;
+                        var reading = _engine.ReadCrop(rimg, consensus.DetectorConfidence, consensus.Box);
+                        if (reading is { IsValidTr: true })
+                        {
+                            _confirmer.InjectObservation(key, reading with { InZone = true });
+                            injected++;
+                        }
+                    }
+                }
+
+                // Aşama 4: küçük kırpıntıda FSRCNN x2 (ölçüm: küçük dilim +2/-0; tetik genişlik<SrMaxWidthPx)
+                if (_engine.SuperResolverAvailable && bmp.Width < _options.SrMaxWidthPx
+                    && sw.ElapsedMilliseconds <= _options.EnhanceBudgetMs)
+                {
+                    using var up = _engine.TrySuperResolve(bmp);
+                    if (up != null)
+                    {
+                        var reading = _engine.ReadCrop(up, consensus.DetectorConfidence, consensus.Box);
+                        if (reading is { IsValidTr: true })
+                        {
+                            _confirmer.InjectObservation(key, reading with { InZone = true });
+                            injected++;
+                        }
+                    }
                 }
             }
             if (injected > 0)

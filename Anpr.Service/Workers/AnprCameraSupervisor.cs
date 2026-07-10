@@ -95,6 +95,9 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                     EnhanceTriggerOcr = _options.EnhanceTriggerOcr,
                     EnhanceBudgetMs = _options.EnhanceBudgetMs,
                     WpodModelPath = _options.WpodModelPath,
+                    EnhanceSr = _options.EnhanceSr,
+                    SrMaxWidthPx = _options.SrMaxWidthPx,
+                    SrModelPath = _options.SrModelPath,
                     RoiPolygon = new Anpr.Service.Panel.RoiStore().LoadOrDefault(cam.Id, cam.Roi),
                 };
 

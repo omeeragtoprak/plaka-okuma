@@ -106,6 +106,16 @@ public sealed class AnprOptions
     /// <summary>WPOD rektifikasyon modeli yolu (yoksa/yüklenemezse aşama kendini kapatır).</summary>
     public string WpodModelPath { get; set; } = "models/wpod_lpd.onnx";
 
+    /// <summary>Aşama 4 — FSRCNN ×2 SR: KÜÇÜK kırpıntıda (genişlik &lt; SrMaxWidthPx) ek gözlem.
+    /// ÖLÇÜM: küçük dilim 28→30/41 (+2/−0); 0.8 ms/çağrı.</summary>
+    public bool EnhanceSr { get; set; } = false;
+
+    /// <summary>SR tetiği: kırpıntı genişliği bu değerin altındaysa uygulanır.</summary>
+    public int SrMaxWidthPx { get; set; } = 100;
+
+    /// <summary>FSRCNN modeli yolu.</summary>
+    public string SrModelPath { get; set; } = "models/fsrcnn_x2.onnx";
+
     /// <summary>
     /// Gözlem OCR bütçesi: ROI DIŞI tespitlerden kare başına en fazla bu kadarına (en büyükten başlayarak)
     /// OCR uygulanır ve okumalar InZone=false etiketiyle döner. Kameranın kapsam-dışı (cadde/uzak)

@@ -22,6 +22,20 @@ ocr = ort.InferenceSession(os.path.join(ROOT, "models/cct_xs_v2_erz.onnx"),
                            providers=["CPUExecutionProvider"])
 wpod = ort.InferenceSession(os.path.join(ROOT, "models/wpod_lpd.onnx"),
                             providers=["CPUExecutionProvider"])
+_sr = None
+def sr2x(bgr):
+    """FSRCNN x2: Y kanalı ağla, CrCb bikübik; DIV2K-eğitimli hazır ağırlık."""
+    global _sr
+    if _sr is None:
+        _sr = ort.InferenceSession(os.path.join(ROOT, "models/fsrcnn_x2.onnx"),
+                                   providers=["CPUExecutionProvider"])
+    ycc = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb).astype(np.float32)
+    y = ycc[..., 0:1] / 255.0
+    out = _sr.run(None, {_sr.get_inputs()[0].name: y[None]})[0][0]
+    h2, w2 = out.shape[0], out.shape[1]
+    crcb = cv2.resize(ycc[..., 1:], (w2, h2), interpolation=cv2.INTER_CUBIC)
+    merged = np.concatenate([np.clip(out * 255.0, 0, 255), crcb], axis=2).astype(np.uint8)
+    return cv2.cvtColor(merged, cv2.COLOR_YCrCb2BGR)
 
 
 def read_probs(bgr):
@@ -108,6 +122,7 @@ def main():
     ap.add_argument("--vote", type=float, default=0,
                     help="ÜRETİM proxy'si: ham güven<EŞİK ise rektifiye et ve iki dağılımı TOPLA (oylama)")
     ap.add_argument("--night", action="store_true", help="rektifikasyon yerine GECE normalizasyonu test et")
+    ap.add_argument("--sr", action="store_true", help="rektifikasyon yerine FSRCNN x2 süper çözünürlük test et")
     a = ap.parse_args()
 
     rows = list(csv.DictReader(open(os.path.join(ROOT, "dataset/slices/slices.csv"))))
@@ -134,7 +149,7 @@ def main():
                 if c_raw >= a.vote:
                     ok_rec = ok_raw
                 else:
-                    rimg = night_normalize(bgr) if a.night else rectify(bgr, a.pad)
+                    rimg = sr2x(bgr) if a.sr else (night_normalize(bgr) if a.night else rectify(bgr, a.pad))
                     if rimg is not None:
                         found += 1
                         merged = praw + read_probs(rimg)   # oylama: dağılım toplamı

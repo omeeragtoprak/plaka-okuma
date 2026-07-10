@@ -17,23 +17,31 @@ public sealed class AnprEngine : IDisposable
     private readonly LicensePlateDetector _detector;
     private readonly LicensePlateRecognizer _recognizer;
     private readonly PlateRectifier2? _rectifier;
+    private readonly PlateSuperResolver? _superResolver;
     private volatile RoiPolygon? _roi;
     private volatile string _roiSpec;
     private bool _disposed;
 
     private AnprEngine(AnprOptions options, LicensePlateDetector detector, LicensePlateRecognizer recognizer,
-        PlateRectifier2? rectifier)
+        PlateRectifier2? rectifier, PlateSuperResolver? superResolver)
     {
         _options = options;
         _detector = detector;
         _recognizer = recognizer;
         _rectifier = rectifier;
+        _superResolver = superResolver;
         _roi = RoiPolygon.Parse(options.RoiPolygon);
         _roiSpec = options.RoiPolygon ?? "";
     }
 
     /// <summary>Rektifikasyon aşaması kullanılabilir mi (model yüklendi)?</summary>
     public bool RectifierAvailable => _rectifier != null;
+
+    /// <summary>SR aşaması kullanılabilir mi?</summary>
+    public bool SuperResolverAvailable => _superResolver != null;
+
+    /// <summary>Küçük kırpıntıyı ×2 büyütür; aşama kapalı/başarısızsa null.</summary>
+    public SKBitmap? TrySuperResolve(SKBitmap crop) => _superResolver?.Upscale(crop);
 
     /// <summary>Kırpıntıyı WPOD ile rektifiye eder; dörtgen yok/aşama kapalıysa null.</summary>
     public PlateRectifier2.RectifyResult? TryRectify(SKBitmap crop) => _rectifier?.Rectify(crop);
@@ -80,25 +88,34 @@ public sealed class AnprEngine : IDisposable
             options.OcrConfigPath,
             options.CreateSessionOptions());
 
+        string modelsDir = Path.GetDirectoryName(Path.GetFullPath(options.OcrModelPath)) ?? ".";
+        string Resolve(string p) => Path.IsPathRooted(p) ? p : Path.Combine(modelsDir, Path.GetFileName(p));
+
         PlateRectifier2? rectifier = null;
         if (options.EnhanceRectify)
         {
             try
             {
-                string wpod = Path.IsPathRooted(options.WpodModelPath)
-                    ? options.WpodModelPath
-                    : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(options.OcrModelPath)) ?? ".",
-                                   Path.GetFileName(options.WpodModelPath));
+                string wpod = Resolve(options.WpodModelPath);
                 if (File.Exists(wpod))
                     rectifier = new PlateRectifier2(wpod, options.CreateSessionOptions());
             }
-            catch
-            {
-                rectifier = null; // zarif düşüş: aşama kapalı, servis çalışmaya devam eder
-            }
+            catch { rectifier = null; } // zarif düşüş: aşama kapalı, servis çalışmaya devam eder
         }
 
-        return new AnprEngine(options, detector, recognizer, rectifier);
+        PlateSuperResolver? sr = null;
+        if (options.EnhanceSr)
+        {
+            try
+            {
+                string srp = Resolve(options.SrModelPath);
+                if (File.Exists(srp))
+                    sr = new PlateSuperResolver(srp, options.CreateSessionOptions());
+            }
+            catch { sr = null; }
+        }
+
+        return new AnprEngine(options, detector, recognizer, rectifier, sr);
     }
 
     /// <summary>JPEG/PNG byte dizisinden plaka okur.</summary>
@@ -310,6 +327,7 @@ public sealed class AnprEngine : IDisposable
         _detector.Dispose();
         _recognizer.Dispose();
         _rectifier?.Dispose();
+        _superResolver?.Dispose();
         _disposed = true;
     }
 }

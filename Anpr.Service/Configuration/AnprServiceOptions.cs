@@ -134,6 +134,11 @@ public sealed class AnprServiceOptions
     public int EnhanceBudgetMs { get; set; } = 150;
     public string WpodModelPath { get; set; } = "models/wpod_lpd.onnx";
 
+    /// <summary>FSRCNN x2 SR (küçük kırpıntı). ÖLÇÜM: küçük dilim 28→30/41 (+2/−0), 0.8 ms.</summary>
+    public bool EnhanceSr { get; set; } = true;
+    public int SrMaxWidthPx { get; set; } = 100;
+    public string SrModelPath { get; set; } = "models/fsrcnn_x2.onnx";
+
     /// <summary>Uzamsal iz birleştirme IoU eşiği (aynı fiziksel plaka, ağır varyantlar tek ize). 0 = kapalı.</summary>
     public float SpatialMergeIou { get; set; } = 0.35f;
 
