@@ -16,17 +16,33 @@ public sealed class AnprEngine : IDisposable
     private readonly AnprOptions _options;
     private readonly LicensePlateDetector _detector;
     private readonly LicensePlateRecognizer _recognizer;
+    private readonly PlateRectifier2? _rectifier;
     private volatile RoiPolygon? _roi;
     private volatile string _roiSpec;
     private bool _disposed;
 
-    private AnprEngine(AnprOptions options, LicensePlateDetector detector, LicensePlateRecognizer recognizer)
+    private AnprEngine(AnprOptions options, LicensePlateDetector detector, LicensePlateRecognizer recognizer,
+        PlateRectifier2? rectifier)
     {
         _options = options;
         _detector = detector;
         _recognizer = recognizer;
+        _rectifier = rectifier;
         _roi = RoiPolygon.Parse(options.RoiPolygon);
         _roiSpec = options.RoiPolygon ?? "";
+    }
+
+    /// <summary>Rektifikasyon aşaması kullanılabilir mi (model yüklendi)?</summary>
+    public bool RectifierAvailable => _rectifier != null;
+
+    /// <summary>Kırpıntıyı WPOD ile rektifiye eder; dörtgen yok/aşama kapalıysa null.</summary>
+    public PlateRectifier2.RectifyResult? TryRectify(SKBitmap crop) => _rectifier?.Rectify(crop);
+
+    /// <summary>Hazır kırpıntıda yalnız OCR + TR doğrulama (zenginleştirilmiş gözlemler için).</summary>
+    public PlateReading? ReadCrop(SKBitmap crop, float detConf = 1f, PlateBox box = default)
+    {
+        var ocr = _recognizer.Recognize(crop);
+        return BuildReading(ocr, box, detConf);
     }
 
     /// <summary>Geçerli ROI tanımı ("" = kapalı).</summary>
@@ -64,7 +80,25 @@ public sealed class AnprEngine : IDisposable
             options.OcrConfigPath,
             options.CreateSessionOptions());
 
-        return new AnprEngine(options, detector, recognizer);
+        PlateRectifier2? rectifier = null;
+        if (options.EnhanceRectify)
+        {
+            try
+            {
+                string wpod = Path.IsPathRooted(options.WpodModelPath)
+                    ? options.WpodModelPath
+                    : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(options.OcrModelPath)) ?? ".",
+                                   Path.GetFileName(options.WpodModelPath));
+                if (File.Exists(wpod))
+                    rectifier = new PlateRectifier2(wpod, options.CreateSessionOptions());
+            }
+            catch
+            {
+                rectifier = null; // zarif düşüş: aşama kapalı, servis çalışmaya devam eder
+            }
+        }
+
+        return new AnprEngine(options, detector, recognizer, rectifier);
     }
 
     /// <summary>JPEG/PNG byte dizisinden plaka okur.</summary>
@@ -275,6 +309,7 @@ public sealed class AnprEngine : IDisposable
         if (_disposed) return;
         _detector.Dispose();
         _recognizer.Dispose();
+        _rectifier?.Dispose();
         _disposed = true;
     }
 }

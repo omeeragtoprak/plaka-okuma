@@ -96,6 +96,7 @@ public sealed class PlateConfirmer
         public string? Alphabet;
         public int Slots;
         public PlateBox LastBox;   // uzamsal iz birleştirme için son görülen kutu
+        public bool Enhanced;      // İkinci-Şans zenginleştirmesi bu ize bir kez uygulandı
         // Fuzzy modda bu izde görülen TÜM okuma varyantları (compact). Eşleşme yalnız Best.Text'e
         // yapılırsa Best geçiş sırasında kayar (drift) ve aynı araç ikinci ize bölünür → çift emit.
         public HashSet<string>? Variants;
@@ -202,6 +203,48 @@ public sealed class PlateConfirmer
         }
 
         return ready ?? (IReadOnlyList<PlateReading>)Array.Empty<PlateReading>();
+    }
+
+    /// <summary>
+    /// Onaylı ama uzlaşı güveni eşiğin altında kalan, henüz zenginleştirilmemiş izler
+    /// (İkinci-Şans Şeridi tetiği). Emit edilmiş izler dahil edilmez.
+    /// </summary>
+    public IReadOnlyList<(string Key, PlateReading Consensus)> PendingLowConf(DateTimeOffset now, float maxOcr)
+    {
+        List<(string, PlateReading)>? list = null;
+        foreach (var kv in _tracks)
+        {
+            var t = kv.Value;
+            if (t.Emitted || t.Enhanced) continue;
+            if (t.Count < _o.MinConfirmations) continue;
+            if (now - t.Last > _o.DedupWindow) continue;
+            var c = BuildResult(t);
+            if (c.OcrConfidence < maxOcr) (list ??= new()).Add((kv.Key, c));
+        }
+        return list ?? (IReadOnlyList<(string, PlateReading)>)Array.Empty<(string, PlateReading)>();
+    }
+
+    /// <summary>
+    /// Zenginleştirilmiş okuma mevcut ize EK GÖZLEM olarak katılır (SlotSum toplanır, varyant eklenir).
+    /// Emit tekilliği bozulmaz: olay yine normal yoldan (onay/settle) TEK kez çıkar.
+    /// </summary>
+    public void InjectObservation(string key, PlateReading reading)
+    {
+        if (!_tracks.TryGetValue(key, out var t) || !reading.IsValidTr) return;
+        t.Count++;
+        if (reading.Confidence > t.Best.Confidence) t.Best = reading;
+        (t.Variants ??= new HashSet<string>()).Add(Compact(reading.Text));
+        if (_o.CharacterVoting && reading.SlotProbs is { Length: > 0 } sp2 && reading.OcrAlphabet is { Length: > 0 })
+        {
+            if (t.SlotSum != null && t.SlotSum.Length == sp2.Length)
+                for (int i = 0; i < sp2.Length; i++) t.SlotSum[i] += sp2[i];
+        }
+    }
+
+    /// <summary>İzi "zenginleştirildi" olarak işaretler (iz başına tek deneme garantisi).</summary>
+    public void MarkEnhanced(string key)
+    {
+        if (_tracks.TryGetValue(key, out var t)) t.Enhanced = true;
     }
 
     private PlateReading BuildResult(Track t)

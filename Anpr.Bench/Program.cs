@@ -29,6 +29,7 @@ switch (mode)
     case "emitsim": RunEmitSim(args[1], opt); break;
     case "harvest": RunHarvest(args[1], args[2], opt); break;
     case "qscore": RunQScore(args[1], args.Length > 2 ? args[2] : "qscore.csv"); break;
+    case "rectify": RunRectify(args[1], args.Length > 2 ? args[2] : "rectified.png", opt); break;
     default: Usage(); break;
 }
 return;
@@ -235,6 +236,30 @@ void RunFuseTest(string datasetDir, string labelsPath, BenchOptions o)
     }
 
     Console.WriteLine($"--- TEK-kare en iyi: {singleOk}/{cars.Count} | ÇOK-KARELİ FÜZYON: {fusedOk}/{cars.Count} ---");
+}
+
+// ---------------------------------------------------------------- RECTIFY (teşhis)
+// Tek kırpıntıda WPOD rektifikasyonu: quad/eğiklik yazdırır, warp'ı kaydeder, ham vs rektifiye OCR karşılaştırır.
+void RunRectify(string imgPath, string outPath, BenchOptions o)
+{
+    o.EnhanceRectify = true;
+    using var engine = MakeEngine(o);
+    using var raw = SkiaSharp.SKBitmap.Decode(imgPath)?.Copy(SkiaSharp.SKColorType.Rgba8888)
+        ?? throw new FileNotFoundException(imgPath);
+    if (!engine.RectifierAvailable) { Console.WriteLine("WPOD modeli yok/yüklenemedi"); return; }
+
+    var r0 = engine.ReadCrop(raw);
+    Console.WriteLine($"HAM      : '{r0?.Text}' ocr={r0?.OcrConfidence:P0} tr={r0?.IsValidTr}");
+    var rect = engine.TryRectify(raw);
+    if (rect == null) { Console.WriteLine("quad bulunamadı"); return; }
+    using var rimg = rect.Value.Image;
+    Console.WriteLine($"QUAD     : prob={rect.Value.Prob:F2} skew={rect.Value.SkewDeg:F1}° persp={rect.Value.PerspRatio:F2}");
+    var r1 = engine.ReadCrop(rimg);
+    Console.WriteLine($"REKTİFİYE: '{r1?.Text}' ocr={r1?.OcrConfidence:P0} tr={r1?.IsValidTr}");
+    using var img = SkiaSharp.SKImage.FromBitmap(rimg);
+    using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+    File.WriteAllBytes(outPath, data.ToArray());
+    Console.WriteLine($"-> {outPath}");
 }
 
 // ---------------------------------------------------------------- QSCORE
@@ -504,6 +529,7 @@ AnprEngine MakeEngine(BenchOptions o) => AnprEngine.Create(new AnprOptions
     DeskewPlates = o.Deskew,
     MinPlateWidthRatio = o.MinPlateW,
     RoiPolygon = o.Roi,
+    EnhanceRectify = o.EnhanceRectify,
     CropQualityGate = o.QualityBlurMin > 0 || o.QualityDarkMax < 1 || o.QualityBrightMax < 1,
     QualityBlurMin = o.QualityBlurMin,
     QualityDarkMaxPct = o.QualityDarkMax,
@@ -654,6 +680,7 @@ sealed class BenchOptions
     public float EarlyEmit = 0;
     public float SpatialIou = 0;   // uzamsal iz birleştirme (0=kapalı, baseline)
     public float SkipChar = 0;     // SKIP_CHAR seviyesi (0=kapalı, baseline)
+    public bool EnhanceRectify = false; // WPOD rektifikasyonu (rectify teşhis modu / A/B)
     public float QualityBlurMin = 0;  // kalite kapısı (0=kapalı)
     public float QualityDarkMax = 1;
     public float QualityBrightMax = 1;

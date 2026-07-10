@@ -128,6 +128,8 @@ public sealed class CameraWorker : IAsyncDisposable
                 catch (Exception ex) { _logger.LogWarning("[{Cam}] kare işleme hatası: {Msg}", _camera.Id, ex.Message); }
             }
 
+            EnhancePendingTracks(now); // İkinci-Şans: düşük güvenli izlere emit ÖNCESİ ek gözlem
+
             foreach (var best in _confirmer.DrainReady(now))
                 Emit(best, now, scope: "roi");
             foreach (var best in _obsConfirmer.DrainReady(now))
@@ -181,6 +183,49 @@ public sealed class CameraWorker : IAsyncDisposable
             (r.InZone ? _confirmer : _obsConfirmer).Observe(r, now);
         }
         return zoneDetection;
+    }
+
+    // İkinci-Şans Şeridi (Aşama 2): onaylı ama uzlaşı güveni eşiğin altındaki izler için, izin en iyi
+    // kırpıntıları WPOD ile rektifiye edilip OCR'lanır ve oylamaya EK GÖZLEM olarak katılır.
+    // İz başına 1 kez; süre bütçeli; yalnız bölge-içi (roi) izler. Ham gözlemler korunduğu için
+    // kötü bir rektifikasyon çıktısı oylamada azınlıkta kalır (deskew-faciası yapısal engelli).
+    private void EnhancePendingTracks(DateTimeOffset now)
+    {
+        if (!_options.EnhanceRectify || !_engine.RectifierAvailable) return;
+
+        var pending = _confirmer.PendingLowConf(now, _options.EnhanceTriggerOcr);
+        if (pending.Count == 0) return;
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        foreach (var (key, consensus) in pending)
+        {
+            if (sw.ElapsedMilliseconds > _options.EnhanceBudgetMs) break; // bütçe: kalanlar sonraki tura
+
+            _confirmer.MarkEnhanced(key); // tek deneme garantisi (kırpıntı bulunamasa da)
+            var bucket = FindBucket(Compact(consensus.Text));
+            if (bucket == null || bucket.Crops.Count == 0) continue;
+
+            // En yüksek güvenli 2 kırpıntı
+            var top = bucket.Crops.OrderByDescending(c => c.Conf).Take(2).ToList();
+            int injected = 0;
+            foreach (var (bmp, _) in top)
+            {
+                if (sw.ElapsedMilliseconds > _options.EnhanceBudgetMs) break;
+                var rect = _engine.TryRectify(bmp);
+                if (rect == null) continue;
+                using var rimg = rect.Value.Image;
+                var reading = _engine.ReadCrop(rimg, consensus.DetectorConfidence, consensus.Box);
+                if (reading is { IsValidTr: true })
+                {
+                    _confirmer.InjectObservation(key, reading with { InZone = true });
+                    injected++;
+                }
+            }
+            if (injected > 0)
+                _logger.LogInformation(
+                    "[{Cam}] enhance: '{Text}' (ocr={Conf:P0}) izine {N} rektifiye gözlem eklendi ({Ms} ms)",
+                    _camera.Id, consensus.Text, consensus.OcrConfidence, injected, sw.ElapsedMilliseconds);
+        }
     }
 
     // ---- Çok-kareli füzyon yardımcıları ----

@@ -87,6 +87,10 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                     QualityBlurMin = _options.QualityBlurMin,
                     QualityDarkMaxPct = _options.QualityDarkMaxPct,
                     QualityBrightMaxPct = _options.QualityBrightMaxPct,
+                    EnhanceRectify = _options.EnhanceRectify,
+                    EnhanceTriggerOcr = _options.EnhanceTriggerOcr,
+                    EnhanceBudgetMs = _options.EnhanceBudgetMs,
+                    WpodModelPath = _options.WpodModelPath,
                     RoiPolygon = new Anpr.Service.Panel.RoiStore().LoadOrDefault(cam.Id, cam.Roi),
                 };
 

@@ -128,6 +128,12 @@ public sealed class AnprServiceOptions
     public float QualityDarkMaxPct { get; set; } = 0.85f;
     public float QualityBrightMaxPct { get; set; } = 0.80f;
 
+    /// <summary>WPOD rektifikasyonu (İkinci-Şans Aşama 2). ÖLÇÜM: açılı 61→67, temiz 341→359 (oylama-birleşimli).</summary>
+    public bool EnhanceRectify { get; set; } = true;
+    public float EnhanceTriggerOcr { get; set; } = 0.98f;
+    public int EnhanceBudgetMs { get; set; } = 150;
+    public string WpodModelPath { get; set; } = "models/wpod_lpd.onnx";
+
     /// <summary>Uzamsal iz birleştirme IoU eşiği (aynı fiziksel plaka, ağır varyantlar tek ize). 0 = kapalı.</summary>
     public float SpatialMergeIou { get; set; } = 0.35f;
 

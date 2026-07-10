@@ -255,3 +255,25 @@ KVKK: plaka görüntüsü repoya girmez). Yapılandırma: `CropQualityGate=true,
 QualityDarkMaxPct=0.85, QualityBrightMaxPct=0.80`; sağlıkta `qualityDropped` sayacı.
 
 Sıradaki: Faz 2 — WPOD kapılı rektifikasyon (iz-içi, `InjectObservation`).
+
+## 5h. Güncelleme (2026-07-10 gece): Faz 2 — WPOD rektifikasyonu KAPIYI GEÇTİ, CANLIDA
+
+Ölçüm-önce disiplini uygulandı: C# portundan ÖNCE offline python A/B'si (`enhance_ab.py`), üç modda:
+1. **Kör değiştirme** (strawman): açılı 61→69/86 KAZANIR ama temiz 341→307 ÇÖKER (deskew dersi tekrar).
+2. **Güven-kapılı kazanan-alır** (<0.85): neredeyse hiç tetiklenmedi — KRİTİK BULGU: açılı plakalarda
+   model kendinden emin şekilde YANLIŞ okuyor (yanlışların çoğu güven ≥0.85; 24ACB270@0.96 sınıfı).
+3. **ÜRETİM PROXY'Sİ — dağılım-toplamı oylaması** (tetik <0.98): **açılı 61→67 (+10/−4), temiz
+   341→359 (+26/−8!), karanlık +2, küçük eşit — HER dilimde kazanç, toplam +26 net (+3.9pp)**.
+   Oylama-birleşimi rektifikasyonu hem güvenli hem faydalı kılıyor → tasarımın mekanizması doğrulandı.
+
+C# portu (`PlateRectifier2`): WPOD ONNX decode (stride-16 hücre + 2×3 affine → quad) + DLT homografi
+(8×8 Gauss, OpenCV YOK) + SkiaSharp ters-haritalı bilinear warp + kenar-çoğaltmalı %50 marj besleme.
+Gerçek-vaka doğrulaması: 48° eğik kırpıntıda ham '25 ACL 169' (güven 0.86, YANLIŞ) → rektifiye
+'**25 ACL 153**' (klasör gerçek-değeri, DOĞRU). Boru hattı: `PlateConfirmer.PendingLowConf` (onaylı +
+uzlaşı <0.98 + henüz zenginleştirilmemiş) → CropBucket'tan en iyi 2 kırpıntı → rektifiye → OCR →
+`InjectObservation` (oylamaya EK gözlem; emit tekilliği korunur) → `MarkEnhanced` (iz başına 1 kez);
+`EnhanceBudgetMs=150` bütçe; model yok/yüklenemedi → aşama kendini kapatır. 67/67 test (homografi
+köşe-eşleme ±0.5px, dejenerede null, inject-tek-emit); diag4 bataryası değişmedi (bench yolu ayrı).
+Yapılandırma: `EnhanceRectify=true, EnhanceTriggerOcr=0.98, EnhanceBudgetMs=150`.
+
+Sıradaki: canlı "kurtarılan iz" istatistiği (enhance logları) + Faz 3 gece normalizasyonu.

@@ -91,6 +91,22 @@ public sealed class AnprOptions
     public float QualityBrightMaxPct { get; set; } = 1f;
 
     /// <summary>
+    /// İkinci-Şans Şeridi Aşama 2 — WPOD rektifikasyonu: onaylı ama düşük güvenli izlerde, izin en iyi
+    /// kırpıntıları perspektif-düzeltilip OCR'lanır ve oylamaya EK GÖZLEM olarak katılır.
+    /// ÖLÇÜM (offline, dağılım-toplamı): açılı 61→67/86, temiz 341→359/416 — her dilimde kazanç.
+    /// </summary>
+    public bool EnhanceRectify { get; set; } = false;
+
+    /// <summary>Zenginleştirme tetiği: iz uzlaşı OCR güveni bu eşiğin ALTINDAysa çalışır (ölçülen: 0.98).</summary>
+    public float EnhanceTriggerOcr { get; set; } = 0.98f;
+
+    /// <summary>İz başına zenginleştirme süre bütçesi (ms); aşımda kalan adımlar atlanır.</summary>
+    public int EnhanceBudgetMs { get; set; } = 150;
+
+    /// <summary>WPOD rektifikasyon modeli yolu (yoksa/yüklenemezse aşama kendini kapatır).</summary>
+    public string WpodModelPath { get; set; } = "models/wpod_lpd.onnx";
+
+    /// <summary>
     /// Gözlem OCR bütçesi: ROI DIŞI tespitlerden kare başına en fazla bu kadarına (en büyükten başlayarak)
     /// OCR uygulanır ve okumalar InZone=false etiketiyle döner. Kameranın kapsam-dışı (cadde/uzak)
     /// okumalarıyla panelde eşleşebilmek için; bariyer kararına girmez. 0 = kapalı (eski davranış).
