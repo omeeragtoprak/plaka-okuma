@@ -30,3 +30,18 @@ public class PanelTests
         Assert.Equal(new DateTimeOffset(2026, 7, 6, 15, 20, 30, TimeSpan.FromHours(3)), recs[0].CaptureTime);
     }
 }
+
+public class FrequentPlateRegistryTests
+{
+    [Fact]
+    public void Becomes_frequent_after_min_sightings_high_conf_only()
+    {
+        var r = new Anpr.Service.Events.FrequentPlateRegistry { MinSightings = 3 };
+        for (int i = 0; i < 2; i++) r.Record("25FZ069", 0.99f);
+        r.Record("25FZ069", 0.80f);            // düşük güven sayılmaz
+        Assert.False(r.IsFrequent("25FZ069"));
+        r.Record("25FZ069", 1.0f);
+        Assert.True(r.IsFrequent("25FZ069"));
+        Assert.False(r.IsFrequent("25FZ289")); // varyant müdavim değil
+    }
+}

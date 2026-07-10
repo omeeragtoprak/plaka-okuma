@@ -43,6 +43,16 @@ builder.WebHost.ConfigureKestrel(k =>
     k.Listen(ip, opts.HttpPort);
 });
 
+// --- Müdavim plaka kaydı (varyant bastırma kural-D) ---
+builder.Services.AddSingleton(sp =>
+{
+    var reg = new FrequentPlateRegistry();
+    int n = reg.LoadFromJsonl(Path.Combine(AppContext.BaseDirectory, "events.jsonl"));
+    sp.GetRequiredService<ILogger<FrequentPlateRegistry>>()
+      .LogInformation("müdavim kaydı: {N} olaydan {M} plaka yüklendi", n, reg.Count);
+    return reg;
+});
+
 // --- Olay hedefleri (sinks) ---
 builder.Services.AddSingleton<InMemoryEventStore>();
 builder.Services.AddSingleton<IEventSink>(sp => sp.GetRequiredService<InMemoryEventStore>());

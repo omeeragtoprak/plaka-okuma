@@ -112,7 +112,7 @@ function push(f,side,rec,key){ if(f.keys.has(key))return; f.keys.add(key);
     const r=arr[i];
     if(rec.t-r.t>COLLAPSE_MS)break;
     if(compact(r.plate)===pc){
-      r.t=Math.max(r.t,rec.t); r.n=(r.n||1)+1;
+      r.t0=Math.min(r.t0||r.t,rec.t); r.t=Math.max(r.t,rec.t); r.n=(r.n||1)+1;
       if(rec.conf!=null&&(r.conf==null||rec.conf>r.conf))r.conf=rec.conf;
       if(rec.ev)r.ev=rec.ev;
       if(rec.scope==="roi")r.scope="roi"; // bölge-içi okuma gözlemi yükseltir
@@ -121,18 +121,29 @@ function push(f,side,rec,key){ if(f.keys.has(key))return; f.keys.add(key);
   }
   arr.push(rec); if(arr.length>200)arr.shift(); }
 
+function inWin(c,o,ms){ const lo=(o.t0||o.t)-ms, hi=o.t+ms; return c.t>=lo&&c.t<=hi; }
 function rematch(f,other){
   f.cam.forEach(r=>{r.match="red";r.pair=null;r.cross=false;});
   f.ours.forEach(r=>{r.match="blue";r.pair=null;});
+  // 1. geçiş: yalnız BİREBİR eşleşmeler (varyant satırının birebir eşi çalmasını önler)
   for(const o of f.ours){
-    let best=null,bestD=2;
+    if(o.pair)continue;
     for(const c of f.cam){
       if(c.pair)continue;
-      if(Math.abs(c.t-o.t)>30000)continue;
-      const d=lev(compact(o.plate),compact(c.plate));
-      if(d<bestD){bestD=d;best=c;if(d===0)break;}
+      if(!inWin(c,o,30000))continue;
+      if(compact(o.plate)===compact(c.plate)){o.pair=c;c.pair=o;o.match=c.match="green";break;}
     }
-    if(best){o.pair=best;best.pair=o;o.match=best.match=(bestD===0?"green":"yellow");}
+  }
+  // 2. geçiş: 1-fark
+  for(const o of f.ours){
+    if(o.pair)continue;
+    let best=null;
+    for(const c of f.cam){
+      if(c.pair)continue;
+      if(!inWin(c,o,30000))continue;
+      if(lev(compact(o.plate),compact(c.plate))===1){best=c;break;}
+    }
+    if(best){o.pair=best;best.pair=o;o.match=best.match="yellow";}
   }
   // 2. geçiş: kalan kırmızılar cadde-geçişi olabilir — BİZİM DİĞER kameradaki okumayla eşle (⇄).
   if(other){
@@ -140,7 +151,7 @@ function rematch(f,other){
       if(c.pair)continue;
       let bestD=2, hit=null;
       for(const o of other.ours){
-        if(Math.abs(c.t-o.t)>45000)continue;
+        if(!inWin(c,o,45000))continue;
         const d=lev(compact(c.plate),compact(o.plate));
         if(d<bestD){bestD=d;hit=o;if(!d)break;}
       }

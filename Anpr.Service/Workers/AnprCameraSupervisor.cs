@@ -32,13 +32,17 @@ public sealed partial class AnprCameraSupervisor : IHostedService
     }
     public DateTimeOffset StartedAtUtc { get; private set; }
 
+    private readonly Events.FrequentPlateRegistry _frequent;
+
     public AnprCameraSupervisor(
         IOptions<AnprServiceOptions> options,
         IEnumerable<IEventSink> sinks,
+        Events.FrequentPlateRegistry frequent,
         ILoggerFactory loggerFactory)
     {
         _options = options.Value;
         _sinks = sinks.ToList();
+        _frequent = frequent;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<AnprCameraSupervisor>();
     }
@@ -99,7 +103,7 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                 var frameSource = new FfmpegFrameSource(cam.Id, rtspUrl, _options.Ffmpeg, _options.Fps, sourceLogger);
                 var workerLogger = _loggerFactory.CreateLogger($"Camera:{cam.Id}");
 
-                var worker = new CameraWorker(cam, _options, frameSource, engine, _sinks, workerLogger);
+                var worker = new CameraWorker(cam, _options, frameSource, engine, _sinks, _frequent, workerLogger);
                 worker.Start(_cts.Token);
                 lock (_workersLock) _workers.Add(worker);
 

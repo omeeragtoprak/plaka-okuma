@@ -65,12 +65,15 @@ public sealed class CameraWorker : IAsyncDisposable
     public DateTimeOffset? LastEventUtc { get; private set; }
     public string? LastPlate { get; private set; }
 
+    private readonly FrequentPlateRegistry _frequent;
+
     public CameraWorker(
         CameraOptions camera,
         AnprServiceOptions options,
         IFrameSource frameSource,
         AnprEngine engine,
         IReadOnlyList<IEventSink> sinks,
+        FrequentPlateRegistry frequent,
         ILogger logger)
     {
         _camera = camera;
@@ -78,6 +81,7 @@ public sealed class CameraWorker : IAsyncDisposable
         _frameSource = frameSource;
         _engine = engine;
         _sinks = sinks;
+        _frequent = frequent;
         _logger = logger;
         PlateConfirmerOptions MakeOpts() => new()
         {
@@ -415,6 +419,13 @@ public sealed class CameraWorker : IAsyncDisposable
                 if (!dup && best.OcrConfidence < _options.ManualReviewMinOcr && r.OcrConf >= 0.9f
                     && Levenshtein(compact, r.Compact) <= 2)
                     dup = true;
+                // Kural D — müdavim varyantı: az önce emit edilen plaka MÜDAVİMSE (defalarca ≥0.98
+                // görülmüş), yeni emit müdavim DEĞİLSE, yakın-varyantsa (lev≤2) ve güveni <0.95 ise
+                // bu aynı geçişin yanlış-okumasıdır (25FZ069→25FZ289 vakası). Gerçek ikinci araç ya
+                // kendisi müdavimdir ya da ≥0.95 okunur.
+                if (!dup && best.OcrConfidence < 0.95f && !_frequent.IsFrequent(compact)
+                    && _frequent.IsFrequent(r.Compact) && Levenshtein(compact, r.Compact) <= 2)
+                    dup = true;
                 if (dup)
                 {
                     _logger.LogInformation("[{Cam}] varyant bastırıldı: '{New}' (ocr={NewC:P0}) ~ önceki emit '{Old}' ({Ago:F0} sn önce)",
@@ -424,6 +435,7 @@ public sealed class CameraWorker : IAsyncDisposable
             }
         }
         _recentEmits.Add(new RecentEmit(now, compact, candSet, scope, best.OcrConfidence));
+        if (scope == "roi") _frequent.Record(compact, best.OcrConfidence);
         if (_recentEmits.Count > 32) _recentEmits.RemoveAt(0);
 
         var evt = new PlateEvent

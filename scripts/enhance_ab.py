@@ -63,6 +63,20 @@ def wpod_quad(bgr, bound=208, threshold=0.35):
     return pts  # 2x4 TL,TR,BR,BL
 
 
+def night_normalize(bgr):
+    """Gece normalizasyonu: %2-%98 histogram germe + ortalama-griyi ~120'ye çeken gamma."""
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    lo, hi = np.percentile(gray, 2), np.percentile(gray, 98)
+    if hi - lo < 5:
+        return None
+    out = np.clip((bgr.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255)
+    m = max(1.0, float(cv2.cvtColor(out.astype(np.uint8), cv2.COLOR_BGR2GRAY).mean()))
+    gamma = math.log(120.0 / 255.0) / math.log(m / 255.0) if 0 < m < 255 else 1.0
+    gamma = min(3.0, max(0.33, gamma))
+    out = np.clip(((out / 255.0) ** gamma) * 255.0, 0, 255).astype(np.uint8)
+    return out
+
+
 def rectify(bgr, pad_ratio):
     """ort-alpr reçetesi: marjlı besle -> quad -> maks kenar 240'a ölçekli hedef + %10 kenar payı -> warp."""
     h0, w0 = bgr.shape[:2]
@@ -93,6 +107,7 @@ def main():
                     help="tasarım proxy'si: yalnız ham güven<0.85 iken dene; güveni yüksek olan kazanır")
     ap.add_argument("--vote", type=float, default=0,
                     help="ÜRETİM proxy'si: ham güven<EŞİK ise rektifiye et ve iki dağılımı TOPLA (oylama)")
+    ap.add_argument("--night", action="store_true", help="rektifikasyon yerine GECE normalizasyonu test et")
     a = ap.parse_args()
 
     rows = list(csv.DictReader(open(os.path.join(ROOT, "dataset/slices/slices.csv"))))
@@ -119,7 +134,7 @@ def main():
                 if c_raw >= a.vote:
                     ok_rec = ok_raw
                 else:
-                    rimg = rectify(bgr, a.pad)
+                    rimg = night_normalize(bgr) if a.night else rectify(bgr, a.pad)
                     if rimg is not None:
                         found += 1
                         merged = praw + read_probs(rimg)   # oylama: dağılım toplamı

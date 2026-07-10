@@ -21,13 +21,17 @@ python3 scripts/camera_compare.py --root "$PWD" \
   --poll-dir dataset/diag4 --frames-root dataset/diag4 --fps-list 2 --fuzzy 1 --minconfirm 2 \
   --ocr "$OCR" | grep -E "TOPLAM"
 
-echo "--- 3) live1h: 101 etiketli araç (referans: erz 87/101 & 31 yanlış-emit) ---"
+echo "--- 3) live1h: 101 etiketli araç (kareler 2026-07-11'de disk için silindi; labels.json duruyor) ---"
+if ! find dataset/live1h -name "*.jpg" 2>/dev/null | head -1 | grep -q .; then
+  echo "    atlandı (kare yok — yeniden yakalanırsa labels.json ile tekrar etiketlenebilir)"
+else
 dotnet run -c Release --no-build --project Anpr.Bench -- evaluate dataset/live1h dataset/live1h/labels.json \
   --ocr "$OCR" --minocr 0.45 --emitfloor 0.45 --mergeprovince false --minconfirm 2 --fuzzy 1 --label reg 2>&1 \
   | grep -iE "Plaka tam|TOPLAM emit|Karakter|gecikme"
 
 if [ -f dataset/finetune/val.csv ] && "$PYENV" -c "import onnxruntime" 2>/dev/null; then
-  echo "--- 4) kırpıntı-exact (val + gece; referans: erz %75 / %84) ---"
+  fi
+echo "--- 4) kırpıntı-exact (val + gece; referans: erz %75 / %84) ---"
   for CSV in val.csv night_all.csv; do
     [ -f "dataset/finetune/$CSV" ] || continue
     "$PYENV" - "$OCR" "dataset/finetune/$CSV" <<'PY'

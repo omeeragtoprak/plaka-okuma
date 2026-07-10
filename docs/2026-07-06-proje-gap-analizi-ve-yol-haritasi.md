@@ -277,3 +277,24 @@ köşe-eşleme ±0.5px, dejenerede null, inject-tek-emit); diag4 bataryası değ
 Yapılandırma: `EnhanceRectify=true, EnhanceTriggerOcr=0.98, EnhanceBudgetMs=150`.
 
 Sıradaki: canlı "kurtarılan iz" istatistiği (enhance logları) + Faz 3 gece normalizasyonu.
+
+## 5i. Güncelleme (2026-07-11): disk temizliği + panel eşleştirme düzeltmeleri + MÜDAVİM kaydı + Faz 3 ELENDİ
+
+**Disk:** dataset 35GB→8.5GB (live1h/diag9/s1/s2/harvest_tmp kareleri silindi; labels/poll dosyaları
+korundu; diag4 ana batarya olarak duruyor). regression.sh live1h'i kare yoksa atlar.
+
+**Panel eşleştirme kusurları (kullanıcı: "birebir olduğu halde sayılmamış"):** (1) birleştirilmiş
+satırın zamanı en-yeniye kayıyordu → satır artık [ilk,son] zaman ARALIĞI taşıyor, eşleşme aralığa
+±30 sn bakar; (2) açgözlü eşleştirmede varyant satırı birebir eşi çalabiliyordu → önce-birebir
+iki-geçişli eşleştirme.
+
+**Müdavim plaka kaydı (kural D):** 25FZ069 vakası (müdavim araç, 4 sn sonra 25FZ289@0.89 ikinci
+emit — aday-kapsama ve düşük-güven kuralları kaçırdı). `FrequentPlateRegistry`: ≥0.98 güvenle ≥5 kez
+görülen plakalar müdavim (açılışta events.jsonl'dan tohum: 3.560 olaydan 357 plaka). Kural D:
+son 30 sn'de müdavim emit'i varken, müdavim-olmayan lev≤2 varyant güven<0.95 ile gelirse bastırılır
+(gerçek ikinci araç ya müdavimdir ya ≥0.95 okunur). 68/68 test.
+
+**Faz 3 (gece normalizasyonu) ÖLÇÜLDÜ ve ELENDİ:** %2-98 germe + gamma, güvenli oylama-birleşimiyle
+bile her dilimde kayıp (karanlık 99→97, temiz 341→334; toplam +1/−13). Sahaya fine-tune'lu OCR
+pozlamaya zaten dayanıklı; ön-işleme gürültü büyütüp oy havuzunu kirletiyor. Gece yolu = VERİ
+(gece kırpıntısı hasadı + re-tune), ön-işleme değil.
