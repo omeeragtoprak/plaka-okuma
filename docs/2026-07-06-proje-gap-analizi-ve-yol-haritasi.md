@@ -333,3 +333,21 @@ açılı 60→63 (+3), temiz 335→336, toplam berabere.**
 büyük veri ölçeğinde geçerli. erz'in kazancı GERÇEK saha verisindendi. Gece/küçük yolu:
 (1) gerçek koşul verisi hasadı (KIŞ önceliği), (2) çalışma-zamanı ikinci-şans aşamaları
 (WPOD + FSRCNN — ikisi de canlıda ve dilimlerinde kazançlı). v4 arşivde (models/cct_xs_v4_erz.onnx).
+
+## 5l. Güncelleme (2026-07-11 devam): canlı saha raporu + statik QDQ INT8 sorusu KAPANDI
+
+**Canlı gün istatistiği (bugünkü deploy'lardan beri):** 32 zenginleştirme olayı (WPOD, 27-96 ms —
+bütçe içi), 1 tam kurtarma (**25 ADS 633: %77→%100**), 18 izde güven artışı (92→96 sınıfı);
+28 isabetli varyant bastırma (25AEJ00~023, 25ADS00~033...); kalite kapısı çıkışta 19 çöp kırpıntı
+eledi (giriş 0 — çıkış kamerası daha çok uzak/bulanık görüyor).
+
+**Statik QDQ INT8 (dinamik elenmişti; statik hiç denenmemişti):**
+- Reçete: Conv-only + QUInt8 akt. + QInt8 ağırlık + reduce_range + per-channel + GERÇEK veri
+  kalibrasyonu (`scripts/quantize_qdq.py`). Tuzaklar belgelendi: per-channel MatMul → QLinearMatMul
+  CPU çekirdeği reddediyor (skaler zero-point ister) → MatMul float bırakılır.
+- **OCR QDQ: TEKNİK BAŞARI** — dilim doğruluğu eşdeğer (485→488/625), diag4 birebir korunur
+  (gürültü 9→11), **C# ORT yükler ve okur** ("INT8 C#'ta imkânsız" hükmü statik yol için tersine
+  döndü), ARM'da %17 hız, boyut 2.9→2.1MB. Üretime ALINMADI: OCR zaten ~1.3 ms (kazanç önemsiz),
+  +2 gürültü bedava değil → hedef-PC pilotunda fps sıkışırsa kanıtlanmış yedek.
+- **Dedektör QDQ: ELENDİ** — diag4 birebir 22→21 (dedektöre dokunan her deneme gibi). Boyut 7.6→2.6MB
+  cazibesine rağmen doğruluk önce gelir; hedef PC'de gerekirse daha büyük kalibrasyon setiyle tekrar.
