@@ -16,7 +16,7 @@ dotnet test Anpr.Tests/Anpr.Tests.csproj -c Release 2>&1 | grep -E "Başarılı!
 
 echo "--- 2) diag4: kamera-referans (15 dk, poll gerçek-değeri; referans: erz 22/26, global 21/26) ---"
 python3 scripts/camera_compare.py --root "$PWD" \
-  --cameras 192.168.5.14:giris,192.168.5.15:cikis --user admin --pw "${CAM_PW:-ertansa143623}" \
+  --cameras 192.168.5.14:giris,192.168.5.15:cikis --user admin --pw "${CAM_PW:?CAM_PW ortam değişkeni gerekli (kamera şifresi)}" \
   --t0-file dataset/diag4/t0_15.txt --t1-file dataset/diag4/t1_15.txt --clock-file dataset/diag4/clock_15.txt \
   --poll-dir dataset/diag4 --frames-root dataset/diag4 --fps-list 2 --fuzzy 1 --minconfirm 2 \
   --ocr "$OCR" | grep -E "TOPLAM"

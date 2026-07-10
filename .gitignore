@@ -25,3 +25,7 @@ frames_debug/
 # Benchmark veri setleri (büyük; commit edilmez). labels.json elle saklanabilir.
 dataset/
 bench_out/
+
+# Eğitim ortamı (yeniden kurulabilir: README/finetune-runbook)
+.venv-train/
+publish-win/
