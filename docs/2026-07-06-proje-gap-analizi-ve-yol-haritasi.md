@@ -320,3 +320,16 @@ bilinear, cv2 BT.601 birebir); CropEnhancer Aşama-4; `EnhanceSr=true, SrMaxWidt
 **cct_xs_v4 denemesi (arka planda):** ICPR-reçeteli ODAKLI LR-degradation augmentation
 (Downscale 0.25-0.7 p=0.5 + blur/noise/JPEG agresif, geometri minimal — v3'ün karışık reçetesinden
 farklı). Sonuç ölçülünce karar verilecek (v3 dersi: beklenti temkinli).
+
+## 5k. Güncelleme (2026-07-11): cct_xs_v4 ÖLÇÜLDÜ ve ELENDİ — augmentation dersi kesinleşti
+
+Odaklı LR-degradation reçetesi (ICPR 2026 2.'sinin yöntemi: Downscale 0.25-0.7 + blur/noise/JPEG
+agresif, geometri minimal; 29 epoch, en iyi val yine 4. epoch'ta — v3 ile aynı erken-tepe deseni).
+Dilim sonuçları (v2_erz → v4): **küçük 27→26 (kendi hedefinde kayıp!), karanlık 96→90 (−6),
+açılı 60→63 (+3), temiz 335→336, toplam berabere.**
+
+**Kesinleşen ders (v3 + v4, iki bağımsız reçete):** cct-xs kapasitesinde ve ~2.5k kırpıntılık veri
+ölçeğinde sentetik augmentation hedefli dayanıklılık kazandırmıyor; literatür önerisi (TextZoom/ICPR)
+büyük veri ölçeğinde geçerli. erz'in kazancı GERÇEK saha verisindendi. Gece/küçük yolu:
+(1) gerçek koşul verisi hasadı (KIŞ önceliği), (2) çalışma-zamanı ikinci-şans aşamaları
+(WPOD + FSRCNN — ikisi de canlıda ve dilimlerinde kazançlı). v4 arşivde (models/cct_xs_v4_erz.onnx).
