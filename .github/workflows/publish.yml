@@ -1,0 +1,67 @@
+# NuGet Trusted Publishing — Anpr.Sdk + Anpr.Core'u nuget.org'a yayınlar.
+# Tetik: 'vX.Y.Z' etiketi push edildiğinde (ör. git tag v1.0.0 && git push --tags),
+#        veya elle (Actions sekmesi -> Run workflow -> sürüm gir).
+# Kimlik anahtarı YOK: GitHub OIDC token'ı nuget.org'a gönderilir, karşılığında 1 saatlik
+# geçici anahtar alınır (NuGet/login). Bunun çalışması için nuget.org'da Trusted Publishing
+# politikası tanımlı olmalı (Repository Owner=omeeragtoprak, Repository=plaka-okuma,
+# Workflow File=publish.yml).
+
+name: publish
+
+on:
+  push:
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Yayınlanacak sürüm (ör. 1.0.0)'
+        required: true
+
+permissions:
+  id-token: write   # OIDC token üretimi (Trusted Publishing için ZORUNLU)
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Sürümü belirle (etiket ya da elle girdi)
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"   # v1.0.0 -> 1.0.0
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Yayınlanacak sürüm: $V"
+
+      - name: Testler
+        run: dotnet test OtoparkAnpr.sln -c Release --nologo
+
+      - name: Paketle (Anpr.Core + Anpr.Sdk, aynı sürüm)
+        run: |
+          dotnet pack Anpr.Core/Anpr.Core.csproj -c Release -o dist -p:Version=${{ steps.ver.outputs.version }}
+          dotnet pack Anpr.Sdk/Anpr.Sdk.csproj  -c Release -o dist -p:Version=${{ steps.ver.outputs.version }}
+          ls -lh dist
+
+      - name: NuGet login (OIDC -> 1 saatlik geçici anahtar)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          # nuget.org PROFİL ADI (e-posta değil). Repo değişkeni yoksa omeeragtoprak kullanılır.
+          user: ${{ vars.NUGET_USER || 'omeeragtoprak' }}
+
+      - name: Yayınla (nuget.org)
+        run: >
+          dotnet nuget push "dist/*.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

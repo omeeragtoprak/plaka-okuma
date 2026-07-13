@@ -8,7 +8,11 @@
     <PackageId>Anpr.Core</PackageId>
     <Version>0.9.0</Version>
     <Authors>Erzurum Büyükşehir Belediyesi BİM</Authors>
+    <Company>Erzurum Büyükşehir Belediyesi</Company>
     <Description>CPU-only TR ANPR çekirdeği: tespit + OCR + TR gramer + görüntü iyileştirme (SkiaSharp/ONNX).</Description>
+    <PackageTags>anpr;plate-recognition;turkish-plates;onnx;cpu</PackageTags>
+    <RepositoryUrl>https://github.com/omeeragtoprak/plaka-okuma</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <!-- CPU-only ANPR core. Görüntü işleme: SkiaSharp (MIT lisanslı, ücretsiz; ticari/kamu
          kullanımına uygun) + ONNX Runtime (CPU). SkiaSharp temel paketi osx-arm64 ve win-x64
          native binary'lerini içerir; bu Mac'te de Windows hedefte de çalışır.

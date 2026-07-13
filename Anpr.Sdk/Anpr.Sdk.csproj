@@ -12,9 +12,18 @@
     <PackageId>Anpr.Sdk</PackageId>
     <Version>0.9.0</Version>
     <Authors>Erzurum Büyükşehir Belediyesi BİM</Authors>
+    <Company>Erzurum Büyükşehir Belediyesi</Company>
     <Description>CPU-only Türk plaka tanıma (ANPR): RTSP kamera -> çok-kareli oylama -> plaka olayı. Otopark yazılımına doğrudan gömülebilir çalışma zamanı (AnprRuntime).</Description>
+    <PackageTags>anpr;plate-recognition;turkish-plates;onnx;cpu;rtsp;parking</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/omeeragtoprak/plaka-okuma</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Anpr.Core\Anpr.Core.csproj" />
