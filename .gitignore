@@ -30,3 +30,4 @@ bench_out/
 .venv-train/
 publish-win/
 pilot-kit/
+dataset-corrections/
