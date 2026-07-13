@@ -368,3 +368,13 @@ bekleme 120 sn'ye çıkar (kamera oturum GC'sine zaman tanır). Ayrıca izlenen 
 gibiydi: bekçi asılı akışları yakaladı, üstel geri çekilme çalıştı, /health dürüst "degraded" dedi,
 olay geçmişi korundu. Hedef-PC runbook notu: kesinti sonrası 10+ denemede toparlanmazsa servis
 restart'ı güvenli ilk müdahaledir.
+
+## 5n. Doğrulama (2026-07-13): "en yüksek orana kadar tut" politikası canlı veriyle DOĞRULANDI
+
+Kullanıcı sorusu üzerine ölçüldü. Mekanizma: iz her kareyle oy biriktirir; uzlaşı <0.85 ise emit
+BEKLETİLİR (araç yaklaştıkça oylar iyileşir + İkinci-Şans enjeksiyonları); ≥0.85'te HEMEN emit
+(bariyer gecikmesi); araç kaybolursa settle'da LowConfidence bayrağıyla emit. Canlı kanıt (son 3 gün,
+1.274 roi olayı): %65'i ≥0.98, %7'si 0.95-0.98, %16'sı 0.85-0.95, %11'i settle/<0.85 (bayraklı).
+**"Zirveyi beklemeli miydik?" sorusunun cevabı: HAYIR** — 134 bastırma olayının SIFIRINDA bastırılan
+sonraki varyant, emit edilenden anlamlı yüksek güvenli çıktı; yani 0.85'te erken çıkmak hiçbir vakada
+daha iyi cevabı kaçırmadı. diag4 EarlyEmit süpürmesi (0/0.85/0.95) de duyarsız: 22/26+9 hepsinde aynı.
