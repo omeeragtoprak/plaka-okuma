@@ -1,12 +1,12 @@
 using Anpr.Core;
 using Anpr.Core.Confirmation;
-using Anpr.Service.Configuration;
-using Anpr.Service.Events;
-using Anpr.Service.Frames;
+using Anpr.Sdk.Configuration;
+using Anpr.Sdk.Events;
+using Anpr.Sdk.Frames;
 using Microsoft.Extensions.Logging;
 using SkiaSharp;
 
-namespace Anpr.Service.Workers;
+namespace Anpr.Sdk.Workers;
 
 /// <summary>
 /// Tek bir kamera için okuma döngüsü: en güncel kareyi al -> tespit+oku -> TR doğrula
@@ -30,6 +30,11 @@ public sealed class CameraWorker : IAsyncDisposable
     {
         public readonly HashSet<string> Variants = new();
         public readonly List<(SKBitmap Bmp, float Conf)> Crops = new();
+        // En yüksek güvenli okumanın geldiği TAM KARE (JPEG) — otopark yazılımı "son okunan aracı"
+        // görselleyebilsin diye plaka kırpıntısının yanında bütün sahne saklanır. Kare kaynağı her kare
+        // için ayrı byte[] snapshot verdiği için referans tutmak güvenlidir (mutasyon yok).
+        public byte[]? BestFrameJpeg;
+        public float BestFrameConf = -1f;
         public DateTimeOffset Last;
         public void DisposeAll() { foreach (var (b, _) in Crops) b.Dispose(); Crops.Clear(); }
     }
@@ -184,7 +189,8 @@ public sealed class CameraWorker : IAsyncDisposable
             {
                 list.Add(r);
                 // Geçerli okumaların kırpıntıları saklanır (füzyon + kanıt görüntüsü için; sahiplenilir).
-                if (r.IsValidTr && crop != null) StoreCrop(r, crop, now);
+                // Tam kare de (frame) en iyi okumayla birlikte saklanır (araç görselleme).
+                if (r.IsValidTr && crop != null) StoreCrop(r, crop, frame, now);
                 else crop?.Dispose();
             }
             readings = list;
@@ -279,7 +285,7 @@ public sealed class CameraWorker : IAsyncDisposable
 
     // ---- Çok-kareli füzyon yardımcıları ----
 
-    private void StoreCrop(PlateReading r, SKBitmap crop, DateTimeOffset now)
+    private void StoreCrop(PlateReading r, SKBitmap crop, byte[]? frameJpeg, DateTimeOffset now)
     {
         string compact = Compact(r.Text);
         var bucket = FindBucket(compact);
@@ -290,6 +296,14 @@ public sealed class CameraWorker : IAsyncDisposable
         }
         bucket.Variants.Add(compact);
         bucket.Last = now;
+
+        // Tam kareyi en güvenli okumayla eşle (SaveEvidence en yüksek Conf kırpıntıyı seçer;
+        // burada da en yüksek OcrConfidence kareyi tutarak plaka kırpıntısı ile kare aynı ANA denk gelir).
+        if (frameJpeg != null && _options.SaveFullFrame && r.OcrConfidence > bucket.BestFrameConf)
+        {
+            bucket.BestFrameJpeg = frameJpeg;
+            bucket.BestFrameConf = r.OcrConfidence;
+        }
 
         bucket.Crops.Add((crop, r.OcrConfidence));
         if (bucket.Crops.Count > Math.Max(2, _options.FusionMaxFrames))
@@ -347,14 +361,15 @@ public sealed class CameraWorker : IAsyncDisposable
         }
     }
 
-    // İzin en yüksek güvenli kırpıntısını evidence/ altına JPEG kaydeder; göreli yolu döner.
+    // İzin en yüksek güvenli plaka kırpıntısını ve o okumanın geldiği TAM KAREyi evidence/ altına
+    // JPEG kaydeder; göreli yolları döner (crop = plaka kırpıntısı, frame = araç görünür bütün sahne).
     private int _evidenceCount = -1;
-    private string? SaveEvidence(PlateReading best, DateTimeOffset now)
+    private (string? Crop, string? Frame) SaveEvidence(PlateReading best, DateTimeOffset now)
     {
         try
         {
             var bucket = FindBucket(Compact(best.Text));
-            if (bucket == null || bucket.Crops.Count == 0) return null;
+            if (bucket == null || bucket.Crops.Count == 0) return (null, null);
 
             var top = bucket.Crops[0];
             for (int i = 1; i < bucket.Crops.Count; i++)
@@ -362,13 +377,23 @@ public sealed class CameraWorker : IAsyncDisposable
 
             string dir = Path.Combine(AppContext.BaseDirectory, "evidence");
             Directory.CreateDirectory(dir);
-            string name = $"{now.ToLocalTime():yyyyMMdd-HHmmss}_{_camera.Id}_{Compact(best.Text)}.jpg";
+            string stem = $"{now.ToLocalTime():yyyyMMdd-HHmmss}_{_camera.Id}_{Compact(best.Text)}";
+            string cropName = stem + ".jpg";
 
-            using var img = SKImage.FromBitmap(top.Bmp);
-            using var data = img.Encode(SKEncodedImageFormat.Jpeg, 85);
-            File.WriteAllBytes(Path.Combine(dir, name), data.ToArray());
+            using (var img = SKImage.FromBitmap(top.Bmp))
+            using (var data = img.Encode(SKEncodedImageFormat.Jpeg, 85))
+                File.WriteAllBytes(Path.Combine(dir, cropName), data.ToArray());
+
+            // Tam kare (araç görselleme): en iyi okumanın karesi, ham JPEG olarak yeniden kodlanmadan yazılır.
+            string? frameName = null;
+            if (bucket.BestFrameJpeg != null)
+            {
+                frameName = stem + "_full.jpg";
+                File.WriteAllBytes(Path.Combine(dir, frameName), bucket.BestFrameJpeg);
+            }
 
             // Disk sınırı: her 100 kayıtta bir — (a) KVKK saklama süresi dolanlar, (b) adet fazlası budanır.
+            // Crop ve tam kare aynı dizinde birlikte döner (adet sınırı ikisini de sayar).
             if (_evidenceCount < 0 || ++_evidenceCount % 100 == 0)
             {
                 var files = new DirectoryInfo(dir).GetFiles("*.jpg");
@@ -386,12 +411,12 @@ public sealed class CameraWorker : IAsyncDisposable
                         try { f.Delete(); } catch { /* yoksay */ }
             }
 
-            return "evidence/" + name;
+            return ("evidence/" + cropName, frameName != null ? "evidence/" + frameName : null);
         }
         catch (Exception ex)
         {
             _logger.LogWarning("[{Cam}] kanıt kaydı hatası: {Msg}", _camera.Id, ex.Message);
-            return null;
+            return (null, null);
         }
     }
 
@@ -431,8 +456,8 @@ public sealed class CameraWorker : IAsyncDisposable
 
     private void Emit(PlateReading best, DateTimeOffset now, string scope)
     {
-        // Kanıt kırpıntısı: füzyon bucket'ı bozmadan ÖNCE en iyi kırpıntıyı JPEG'e al.
-        string? evidence = _options.EvidenceCrops ? SaveEvidence(best, now) : null;
+        // Kanıt kırpıntısı + tam kare: füzyon bucket'ı bozmadan ÖNCE en iyi kırpıntı ve karesini JPEG'e al.
+        (string? evidence, string? framePath) = _options.EvidenceCrops ? SaveEvidence(best, now) : (null, null);
 
         // Bulanık/düşük güvenli uzlaşı: çok-kareli füzyonla ikinci şans (yalnız bölge-içi, araç başına 1 kez).
         if (scope == "roi" && _options.MultiFrameFusion && best.OcrConfidence < _options.FusionTriggerOcr)
@@ -497,6 +522,7 @@ public sealed class CameraWorker : IAsyncDisposable
             Box = best.Box,
             Scope = scope,
             EvidencePath = evidence,
+            FramePath = framePath,
             LowConfidence = best.OcrConfidence < _options.ManualReviewMinOcr,
             Candidates = best.Candidates,
         };

@@ -1,0 +1,11 @@
+<Project>
+  <!-- Paketle gelen ONNX modelleri tüketicinin çıktı dizinine models/ olarak kopyalanır.
+       (contentFiles kullanılmadı: ikili dosyalar bazı SDK sürümlerinde Compile'a düşüp
+       CS2015 üretiyor; build-targets yolu tüm tüketicilerde deterministik.) -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\assets\models\**"
+          Link="models\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+</Project>

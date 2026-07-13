@@ -1,8 +1,8 @@
-using Anpr.Service.Configuration;
+using Anpr.Sdk.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Anpr.Service.Events;
+namespace Anpr.Sdk.Events;
 
 /// <summary>Olayları yapısal log olarak yazar. KVKK: MaskPlatesInLogs açıksa plaka maskelenir.</summary>
 public sealed class ConsoleEventSink : IEventSink

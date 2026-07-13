@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Anpr.Core\Anpr.Core.csproj" />
+    <ProjectReference Include="..\Anpr.Sdk\Anpr.Sdk.csproj" />
   </ItemGroup>
 
   <!-- Copy the shared ONNX models + configs into the service output so the

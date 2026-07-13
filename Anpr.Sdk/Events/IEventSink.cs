@@ -1,4 +1,4 @@
-namespace Anpr.Service.Events;
+namespace Anpr.Sdk.Events;
 
 /// <summary>
 /// Plaka olaylarının gönderileceği hedef soyutlaması.

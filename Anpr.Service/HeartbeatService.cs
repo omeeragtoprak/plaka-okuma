@@ -1,6 +1,7 @@
-using Anpr.Service.Configuration;
+using Anpr.Sdk.Configuration;
 using Anpr.Service.Events;
-using Anpr.Service.Workers;
+using Anpr.Sdk.Events;
+using Anpr.Sdk.Workers;
 using Microsoft.Extensions.Options;
 
 namespace Anpr.Service;

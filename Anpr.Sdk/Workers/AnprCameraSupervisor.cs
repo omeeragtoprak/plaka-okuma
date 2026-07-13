@@ -1,13 +1,19 @@
 using System.Text.RegularExpressions;
 using Anpr.Core;
-using Anpr.Service.Configuration;
-using Anpr.Service.Events;
-using Anpr.Service.Frames;
+using Anpr.Sdk.Configuration;
+using Anpr.Sdk.Events;
+using Anpr.Sdk.Frames;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Anpr.Service.Workers;
+namespace Anpr.Sdk.Workers;
+
+/// <summary>
+/// Kameranın etkin ROI tanımını çözer (ör. servis paneli diske kaydedilmiş ROI'yi döndürür).
+/// null kayıt = yapılandırmadaki değer kullanılır.
+/// </summary>
+public delegate string RoiResolver(string cameraId, string configuredRoi);
 
 /// <summary>
 /// Tüm kameraları yönetir: yapılandırmadan her kamera için frame source + AnprEngine + CameraWorker
@@ -22,7 +28,10 @@ public sealed partial class AnprCameraSupervisor : IHostedService
 
     private readonly List<CameraWorker> _workers = new();
     private readonly object _workersLock = new();
-    private readonly CancellationTokenSource _cts = new();
+    // Her başlatmada YENİDEN oluşturulur: StopAsync token'ı iptal edip dispose ettiği için, yeniden
+    // başlatılabilir olmalı (PMS gömülümü gece bakımında Stop→Start yapabilir). Tek-kullanımlık CTS,
+    // ikinci Start'ta worker.Start(_cts.Token)'da ObjectDisposedException'a ve sessiz ölü servise yol açardı.
+    private CancellationTokenSource? _cts;
 
     /// <summary>/health tarafından okunur. Başlangıç/kapanışta liste değişirken anlık görüntü döner
     /// (canlı mutable listeyi enumerate edip InvalidOperationException almamak için).</summary>
@@ -36,23 +45,27 @@ public sealed partial class AnprCameraSupervisor : IHostedService
     public string CpuFeatures { get; private set; } = "";
 
     private readonly Events.FrequentPlateRegistry _frequent;
+    private readonly RoiResolver _roiResolver;
 
     public AnprCameraSupervisor(
         IOptions<AnprServiceOptions> options,
         IEnumerable<IEventSink> sinks,
         Events.FrequentPlateRegistry frequent,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        RoiResolver? roiResolver = null)
     {
         _options = options.Value;
         _sinks = sinks.ToList();
         _frequent = frequent;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<AnprCameraSupervisor>();
+        _roiResolver = roiResolver ?? ((_, configured) => configured);
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         StartedAtUtc = DateTimeOffset.UtcNow;
+        _cts = new CancellationTokenSource(); // yeniden başlatılabilirlik: taze token kaynağı
 
         string detector = ResolveModelPath(_options.DetectorModelPath);
         string ocr = ResolveModelPath(_options.OcrModelPath);
@@ -115,7 +128,7 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                     EnhanceSr = _options.EnhanceSr,
                     SrMaxWidthPx = _options.SrMaxWidthPx,
                     SrModelPath = _options.SrModelPath,
-                    RoiPolygon = new Anpr.Service.Panel.RoiStore().LoadOrDefault(cam.Id, cam.Roi),
+                    RoiPolygon = _roiResolver(cam.Id, cam.Roi),
                 };
 
                 var engine = AnprEngine.Create(anprOptions);
@@ -124,7 +137,7 @@ public sealed partial class AnprCameraSupervisor : IHostedService
                 var workerLogger = _loggerFactory.CreateLogger($"Camera:{cam.Id}");
 
                 var worker = new CameraWorker(cam, _options, frameSource, engine, _sinks, _frequent, workerLogger);
-                worker.Start(_cts.Token);
+                worker.Start(_cts!.Token); // StartAsync başında oluşturuldu, kesin non-null
                 lock (_workersLock) _workers.Add(worker);
 
                 _logger.LogInformation("[{Cam}] '{Name}' kuruldu: {Url}", cam.Id, cam.Name, MaskUrl(rtspUrl));
@@ -141,7 +154,7 @@ public sealed partial class AnprCameraSupervisor : IHostedService
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("ANPR durduruluyor...");
-        _cts.Cancel();
+        _cts?.Cancel();
 
         CameraWorker[] snapshot;
         lock (_workersLock)
@@ -153,7 +166,8 @@ public sealed partial class AnprCameraSupervisor : IHostedService
         {
             try { await w.DisposeAsync(); } catch { /* yoksay */ }
         }
-        _cts.Dispose();
+        _cts?.Dispose();
+        _cts = null; // sonraki StartAsync taze token kaynağı oluşturur
     }
 
     private static string BuildRtspUrl(CameraOptions cam)

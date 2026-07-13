@@ -36,7 +36,7 @@ public class FrequentPlateRegistryTests
     [Fact]
     public void Becomes_frequent_after_min_sightings_high_conf_only()
     {
-        var r = new Anpr.Service.Events.FrequentPlateRegistry { MinSightings = 3 };
+        var r = new Anpr.Sdk.Events.FrequentPlateRegistry { MinSightings = 3 };
         for (int i = 0; i < 2; i++) r.Record("25FZ069", 0.99f);
         r.Record("25FZ069", 0.80f);            // düşük güven sayılmaz
         Assert.False(r.IsFrequent("25FZ069"));

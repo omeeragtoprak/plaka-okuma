@@ -31,3 +31,4 @@ bench_out/
 publish-win/
 pilot-kit/
 dataset-corrections/
+dist/

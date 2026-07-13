@@ -1,9 +1,10 @@
 using System.Net;
 using Anpr.Service;
-using Anpr.Service.Configuration;
+using Anpr.Sdk.Configuration;
 using Anpr.Service.Panel;
 using Anpr.Service.Events;
-using Anpr.Service.Workers;
+using Anpr.Sdk.Events;
+using Anpr.Sdk.Workers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -76,6 +77,12 @@ builder.Services.AddSingleton<CameraRecordPoller>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CameraRecordPoller>());
 
 // --- Kamera yöneticisi (hem singleton hem hosted service) ---
+// ROI çözücü: panelden çizilip diske kaydedilen ROI, yapılandırmadakini ezer (Sdk bunu bilmez).
+builder.Services.AddSingleton<RoiResolver>(sp =>
+{
+    var store = sp.GetRequiredService<RoiStore>();
+    return (cameraId, configured) => store.LoadOrDefault(cameraId, configured);
+});
 builder.Services.AddSingleton<AnprCameraSupervisor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprCameraSupervisor>());
 

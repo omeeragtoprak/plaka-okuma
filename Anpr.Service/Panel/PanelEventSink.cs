@@ -1,4 +1,5 @@
 using Anpr.Service.Events;
+using Anpr.Sdk.Events;
 
 namespace Anpr.Service.Panel;
 

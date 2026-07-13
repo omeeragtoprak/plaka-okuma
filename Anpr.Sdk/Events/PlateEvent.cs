@@ -1,6 +1,6 @@
 using Anpr.Core;
 
-namespace Anpr.Service.Events;
+namespace Anpr.Sdk.Events;
 
 /// <summary>
 /// Geçerli ve yeni bir plaka okumasından üretilen olay. Web app / veritabanı bu modeli tüketir.
@@ -31,8 +31,15 @@ public sealed record PlateEvent
     /// </summary>
     public string Scope { get; init; } = "roi";
 
-    /// <summary>Kanıt kırpıntısının servis-köküne göre yolu (ör. "evidence/xxx.jpg"). Yoksa null.</summary>
+    /// <summary>Kanıt kırpıntısının (yalnız PLAKA) servis-köküne göre yolu (ör. "evidence/xxx.jpg"). Yoksa null.</summary>
     public string? EvidencePath { get; init; }
+
+    /// <summary>
+    /// En iyi okumanın geldiği TAM KARE (aracın da göründüğü bütün sahne) yolu, ör.
+    /// "evidence/xxx_full.jpg". Otopark yazılımı "son okunan aracı" görselleyebilsin diye plaka
+    /// kırpıntısının yanında verilir. SaveFullFrame kapalıysa ya da kare yoksa null.
+    /// </summary>
+    public string? FramePath { get; init; }
 
     /// <summary>Tekil olay kimliği — webhook/PMS tarafında idempotent işleme ve düzeltme geri-bildirimi için.</summary>
     public Guid EventId { get; init; } = Guid.NewGuid();

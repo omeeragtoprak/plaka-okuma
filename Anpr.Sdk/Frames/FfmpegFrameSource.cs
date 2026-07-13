@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using Anpr.Service.Configuration;
+using Anpr.Sdk.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace Anpr.Service.Frames;
+namespace Anpr.Sdk.Frames;
 
 /// <summary>
 /// ffmpeg alt-süreci ile RTSP'ten kare çeken kaynak. ffmpeg MJPEG akışını stdout'a yazar;

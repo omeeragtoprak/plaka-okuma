@@ -1,4 +1,4 @@
-namespace Anpr.Service.Configuration;
+namespace Anpr.Sdk.Configuration;
 
 /// <summary>appsettings.json "Anpr" bölümünün karşılığı.</summary>
 public sealed class AnprServiceOptions
@@ -38,9 +38,11 @@ public sealed class AnprServiceOptions
     /// </summary>
     public bool OnnxAllowSpinning { get; set; } = true;
 
+    // Varsayılanlar SDK ile gelen modellere işaret eder (paket, çıktı dizinine models/ kopyalar) —
+    // PMS tarafında sıfır model-yapılandırmasıyla çalışır. Servis appsettings.json ile ezmeye devam eder.
     public string DetectorModelPath { get; set; } = "models/yolo-v9-t-384-license-plates-end2end.onnx";
-    public string OcrModelPath { get; set; } = "models/cct_xs_v1_global.onnx";
-    public string OcrConfigPath { get; set; } = "models/cct_xs_v1_global_plate_config.yaml";
+    public string OcrModelPath { get; set; } = "models/cct_xs_v2_erz.onnx";
+    public string OcrConfigPath { get; set; } = "models/cct_xs_v2_erz_plate_config.yaml";
 
     /// <summary>Dedektör ham skor eşiği.</summary>
     public float DetectorScoreThreshold { get; set; } = 0.25f;
@@ -183,8 +185,17 @@ public sealed class AnprServiceOptions
     /// </summary>
     public bool EvidenceCrops { get; set; } = true;
 
-    /// <summary>evidence/ klasöründe tutulacak azami dosya sayısı (aşınca en eskiler silinir).</summary>
-    public int EvidenceMaxFiles { get; set; } = 3000;
+    /// <summary>evidence/ klasöründe tutulacak azami dosya sayısı (aşınca en eskiler silinir).
+    /// NOT: SaveFullFrame açıkken olay başına 2 dosya (plaka + tam kare) yazılır; bu sınır ikisini
+    /// birlikte sayar — aynı gün-sayısı kanıt tutmak için gerekiyorsa iki katına çıkarın.</summary>
+    public int EvidenceMaxFiles { get; set; } = 6000;
+
+    /// <summary>
+    /// Her olayda plaka kırpıntısının YANINDA, en iyi okumanın geldiği TAM KAREyi (aracın da göründüğü
+    /// sahne) evidence/..._full.jpg olarak kaydeder ve olayda FramePath ile taşır — otopark yazılımı
+    /// "son okunan aracı" görselleyebilsin diye. EvidenceCrops kapalıysa etkisizdir. Disk için kapatılabilir.
+    /// </summary>
+    public bool SaveFullFrame { get; set; } = true;
 
     /// <summary>
     /// KVKK saklama süresi: bu günden eski kanıt kırpıntıları otomatik silinir (kamu pratiği 30-45 gün;

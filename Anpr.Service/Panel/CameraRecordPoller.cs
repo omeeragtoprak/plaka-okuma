@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
-using Anpr.Service.Configuration;
+using Anpr.Sdk.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace Anpr.Service.Panel;

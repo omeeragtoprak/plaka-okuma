@@ -1,9 +1,56 @@
 # Otopark Yazılımı (PMS) Entegrasyon Kılavuzu
 
 Tarih: 2026-07-13 · Muhatap: otopark yazılımı geliştiricisi / entegratör.
-Mimari karar: OtoparkAnpr, PMS'e **kod modülü (DLL) olarak GÖMÜLMEZ**; aynı PC'de **ayrı bir
-Windows servisi** olarak çalışır ve HTTP ile konuşur (çökme yalıtımı, CPU kontrolü, bağımsız
-güncelleme). PMS tarafında gereken tek geliştirme: aşağıdaki POST'ları alan bir endpoint.
+İki entegrasyon yolu vardır; **ikisi de desteklenir**:
+
+- **Seçenek A — Yan servis (sidecar) + HTTP**: ayrı Windows servisi, webhook ile olay iletir.
+  Çökme yalıtımı ve bağımsız güncelleme ister; PMS'e dokunmadan devreye alınabilir.
+- **Seçenek B — Doğrudan gömülüm (DLL / `Anpr.Sdk`)**: PMS (net8.0+) projesi `Anpr.Sdk`
+  paketini referans alır, `AnprRuntime` sınıfıyla motoru KENDİ süreci içinde çalıştırır.
+  HTTP/webhook yoktur; olaylar C# event'iyle gelir. (Bkz. "Seçenek B" bölümü.)
+
+## Seçenek B — Doğrudan gömülüm (`Anpr.Sdk` DLL)
+
+Paketler: `dist/nuget/Anpr.Sdk.0.9.0.nupkg` + `Anpr.Core.0.9.0.nupkg` (yerel NuGet akışı).
+DLL'leri ELLE KOPYALAMAYIN — ONNX Runtime/SkiaSharp native ikilileri (`runtimes/`) ancak
+NuGet/ProjectReference ile doğru taşınır. PMS çözümünde:
+
+1. `nuget.config`'e yerel kaynak ekleyin: `<add key="anpr" value="...\dist\nuget" />`
+2. `<PackageReference Include="Anpr.Sdk" Version="0.9.0" />` (modeller pakete gömülüdür;
+   derlemede çıktı dizinine `models/` olarak kopyalanır — sıfır elle dosya taşıma).
+3. Kod:
+
+```csharp
+using Anpr.Sdk; using Anpr.Sdk.Configuration;
+
+var runtime = new AnprRuntime(new AnprServiceOptions {
+    Cameras = {
+        new CameraOptions { Id = "giris", Name = "Giriş", RtspUrl = "rtsp://kullanici:sifre@ip:554/Streaming/Channels/101" },
+        new CameraOptions { Id = "cikis", Name = "Çıkış", RtspUrl = "rtsp://..." },
+    }
+}, pmsLoggerFactory);            // PMS'in ILoggerFactory'si (Serilog/NLog köprüsü olabilir)
+
+runtime.PlateDetected += e => {
+    if (e.Scope != "roi") return;          // gözlem okumaları karar üretmez
+    if (e.LowConfidence) OperatorOnayinaDusur(e);   // güven < ManualReviewMinOcr
+    else PlakaKaydet(e.PlateCompact, e.Timestamp, e.CameraId, e.EventId);
+};
+
+await runtime.StartAsync();                 // uygulama kapanışında: await runtime.StopAsync();
+```
+
+Gereksinimler ve dikkat noktaları:
+- **net8.0 veya üzeri, x64/arm64**. PMS .NET Framework 4.x ise bu yol KULLANILAMAZ — Seçenek A'ya dönün.
+- **ffmpeg** hedef PC'de olmalı (PATH'te ya da `options.Ffmpeg.Path`); pilot kitinde mevcut.
+- Olaylar worker thread'lerinden gelir: UI'ya dokunmadan önce marshal edin; işleyiciyi hızlı tutun.
+- Motor PMS süreci İÇİNDE koşar: ~%CPU yükü ve olası bir ANPR çökmesi PMS'i de etkiler
+  (sidecar'ın yalıtım avantajı burada yoktur — bilinçli tercih).
+- Kamera durumu `runtime.Cameras` üzerinden okunur (bağlantı, p50/p95 ms, sayaçlar) — PMS kendi
+  sağlık ekranında gösterebilir. Kanıt kırpıntıları `evidence/` klasörüne yazılmaya devam eder
+  (`EvidenceCrops=false` ile kapatılabilir); KVKK saklama/rotasyon seçenekleri aynen geçerlidir.
+- Örnek uygulama: `samples/PmsOrnek` (canlı kameraya karşı doğrulandı).
+
+Aşağıdaki bölümler Seçenek A (sidecar) içindir.
 
 ## Topoloji (otopark başına)
 

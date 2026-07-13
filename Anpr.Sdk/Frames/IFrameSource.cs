@@ -1,4 +1,4 @@
-namespace Anpr.Service.Frames;
+namespace Anpr.Sdk.Frames;
 
 /// <summary>
 /// Bir kameradan en güncel kareyi (JPEG byte[]) sağlayan kaynak soyutlaması.

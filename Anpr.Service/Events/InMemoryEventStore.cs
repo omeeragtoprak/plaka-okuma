@@ -1,5 +1,6 @@
+using Anpr.Sdk.Events;
 using System.Text.Json;
-using Anpr.Service.Configuration;
+using Anpr.Sdk.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace Anpr.Service.Events;

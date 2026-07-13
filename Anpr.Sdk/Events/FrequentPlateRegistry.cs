@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Anpr.Service.Events;
+namespace Anpr.Sdk.Events;
 
 /// <summary>
 /// Müdavim plaka kaydı: yüksek güvenle (≥0.98) defalarca görülmüş plakalar. Otoparkta düzenli
