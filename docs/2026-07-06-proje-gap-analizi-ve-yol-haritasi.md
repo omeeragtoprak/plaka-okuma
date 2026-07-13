@@ -351,3 +351,20 @@ eledi (giriş 0 — çıkış kamerası daha çok uzak/bulanık görüyor).
   +2 gürültü bedava değil → hedef-PC pilotunda fps sıkışırsa kanıtlanmış yedek.
 - **Dedektör QDQ: ELENDİ** — diag4 birebir 22→21 (dedektöre dokunan her deneme gibi). Boyut 7.6→2.6MB
   cazibesine rağmen doğruluk önce gelir; hedef PC'de gerekirse daha büyük kalibrasyon setiyle tekrar.
+
+## 5m. SAHA VAKASI (2026-07-13 04:32): kamera ağı kesintisi — UC-05 ilk gerçek testi + soğuma modu
+
+**Zaman çizelgesi:** 04:32:40 iki kameranın RTSP+HTTP+ping'i aynı anda gitti (saha: switch/elektrik;
+Mac'in LAN arayüzü sağlamdı). 04:36 ping döndü (kameralar yeniden başlıyor). ~04:38'den itibaren
+RTSP 554 açık ve ffprobe SORUNSUZ akış alıyordu; ama servisin 30 sn'lik yeniden bağlanma denemeleri
+"ffmpeg başladı → 12 sn kare yok → öldür" kısır döngüsünde kaldı (deneme #24'e kadar). 04:46 temiz
+servis restart'ı ANINDA düzeltti (0 restart, kareler akıyor).
+
+**Kök neden:** uzun kesinti + kamera açılışı sırasında 30 sn aralıklı denemeler kamerada RTSP oturum
+artığı biriktiriyor (Hikvision eşzamanlı oturum sınırı — eski yoğun-yakalama dersinin kesinti hali).
+
+**Kalıcı düzeltme (kod):** FfmpegFrameSource soğuma modu — 10+ ardışık başarısız denemeden sonra
+bekleme 120 sn'ye çıkar (kamera oturum GC'sine zaman tanır). Ayrıca izlenen davranışlar tasarımdaki
+gibiydi: bekçi asılı akışları yakaladı, üstel geri çekilme çalıştı, /health dürüst "degraded" dedi,
+olay geçmişi korundu. Hedef-PC runbook notu: kesinti sonrası 10+ denemede toparlanmazsa servis
+restart'ı güvenli ilk müdahaledir.

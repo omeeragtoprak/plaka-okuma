@@ -120,6 +120,12 @@ public sealed class FfmpegFrameSource : IFrameSource
                                  (DateTimeOffset.UtcNow - _attemptStartUtc) > TimeSpan.FromSeconds(5);
             attempt = meaningfulRun ? 0 : attempt + 1;
             int delay = Math.Clamp((int)Math.Pow(2, Math.Min(attempt, 5)), 1, Math.Max(1, _opts.MaxBackoffSeconds));
+            // SOĞUMA MODU (saha vakası 2026-07-13): uzun kamera kesintisi/yeniden başlatması sırasında
+            // 30 sn'lik denemeler kamerada RTSP oturum artığı biriktiriyor (Hikvision eşzamanlı oturum
+            // sınırı) ve kamera açıldıktan sonra bile "ffmpeg başladı ama kare yok" kısır döngüsü oluşuyor
+            // (ffprobe aynı anda sorunsuzdu; temiz servis restart'ı anında düzeltti). 10+ ardışık
+            // başarısız denemeden sonra bekleme 120 sn'ye çıkar — kameranın oturumları temizlemesine izin verir.
+            if (attempt >= 10) delay = Math.Max(delay, 120);
             _restartCount++;
             _logger.LogWarning("[{Cam}] bağlantı koptu; {Delay}s sonra yeniden bağlanılacak (deneme #{Attempt})",
                 _cameraId, delay, attempt);
