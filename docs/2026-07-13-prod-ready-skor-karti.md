@@ -8,13 +8,13 @@ karanlık/aydınlık/güneş · TR plakaları · zayıf CPU-only PC.
 
 | Boyut | Denetim | Bugünkü kapanışlar | GÜNCEL | Kalan ana boşluk |
 |---|---|---|---|---|
-| Doğruluk × koşul matrisi | %42 | (veri-toplama altyapısı kuruldu) | **%42** | kar=0, kapalı-otopark=0, gece-canlı yeniden ölçüm, 250-araç kabul |
+| Doğruluk × koşul matrisi | %42 | 250-araç kabul KOŞULDU (exact %87.3 / N-1 dahil %96.3, gündüz-açık hücresi ölçülü; siyah-plaka zayıflığı keşfedildi → [kabul raporu](2026-07-13-kabul-250-okuma-raporu.md)) | **%50** | kar=0, kapalı-otopark=0, gece-canlı yeniden ölçüm, siyah-plaka hasadı→v5 |
 | 7/24 dayanıklılık | %57 | heartbeat itmesi + kamera-kayıt kalıcılığı + batarya onarımı | **%63** | 72h resmi koşu, Windows-servis kurulumu (hedef PC) |
 | Entegrasyon | %34 | webhook disk-kuyruk+retry (E3) + heartbeat (E5) + düzeltme API (FR-36) | **%50** | E1 yüzey keşfi, Hikvision uyumluluk modu, PMS uçtan-uca test |
 | Güvenlik / KVKK | %42 | panel token (G3) + events.jsonl saklama/rotasyon (G2) + SHA256SUMS | **%68** | aydınlatma metni/tabela (idari), TLS (hedef PC), rol/denetim izi |
 | Performans / hedef-PC | %45 | AVX/CPUID probe + p50/p95-ms health metrikleri + pilot kiti (113MB zip) | **%57** | HEDEF PC'DE SIFIR ÖLÇÜM (tek en büyük bilinmeyen) |
-| Test / ölçüm disiplini | %64 | regression.sh onarıldı + üretim bayrakları gömüldü + skill'ler repo'ya taşındı | **%72** | 250-araç kabul koşusu, 1-hafta gölge raporu, dayanıklılık birim testleri |
-| **GENEL** | **%47** | **9 kapanış** | **~%59** | |
+| Test / ölçüm disiplini | %64 | regression.sh onarıldı + üretim bayrakları gömüldü + skill'ler repo'ya taşındı + 250-araç kabul + shadow_report.py (duman testi ✓) | **%80** | 1-hafta gölge raporu (veri birikiyor), dayanıklılık birim testleri |
+| **GENEL** | **%47** | **11 kapanış** | **~%61** | |
 
 ## Bugün kapatılanlar (kod canlıda, commit'li)
 
@@ -44,8 +44,8 @@ karanlık/aydınlık/güneş · TR plakaları · zayıf CPU-only PC.
 | 1 | **Hedef-PC pilotu** (kit hazır): ms/kare, AVX, 2-kamera fps, QDQ/OpenVINO A/B, Windows-servis kurulumu | perf +25, dayanıklılık +8 | hedef PC | 1-2 gün |
 | 2 | **E1 entegrasyon yüzeyi keşfi** (48h trafik izleme + httpHosts GET, salt-okuma) → uyumluluk modu kararı | entegrasyon +20 | saha PC erişimi | 2-3 gün |
 | 3 | **Gece canlı parite yeniden ölçümü** (tüm iyileştirmeler sonrası; camera-records.jsonl artık biriktiriyor — 2-3 gece sonra analiz) | doğruluk +8 | bu Mac (pasif) | 3 gece + 2 saat |
-| 4 | **250-araç retrospektif kabul kümesi** (kanıt JPEG + events arşivinden insan-gözü etiketli; N/N-1 kırılımı) | doğruluk +9, test +10 | bu Mac | 1-2 gün |
-| 5 | **1-hafta gölge raporu** (camera-records + events'ten günlük otomatik eşleşme özeti) | test +6, doğruluk +5 | bu Mac (pasif) | script 0.5g + 7 gün takvim |
+| 4 | ~~250-araç retrospektif kabul kümesi~~ **TAMAMLANDI 07-13** → [rapor](2026-07-13-kabul-250-okuma-raporu.md); yeni iş: **siyah-plaka kırpıntı hasadı → fine-tune v5** | doğruluk +9, test +10 (alındı) | bu Mac | 1-2 gün |
+| 5 | **1-hafta gölge raporu** (betik hazır: `scripts/shadow_report.py`, duman testi ✓; veri birikiyor) | test +6, doğruluk +5 | bu Mac (pasif) | 7 gün takvim |
 | 6 | **Kapalı otopark 48-72h gölge kaydı** (tek kamera + ROI + insan-gözü/kamera etiketi) | doğruluk +12 | saha | 2-3 gün |
 | 7 | 72h resmi dayanıklılık koşusu (çalışan servis üzerinde pencere ilan et + metrik anlık görüntüleri) | dayanıklılık +6 | bu Mac (pasif) | 3 gün takvim |
 | 8 | Aydınlatma metni taslağı + tabela + envanter (hukukla) | KVKK +12 | idari | taslak 2 saat + süreç |
