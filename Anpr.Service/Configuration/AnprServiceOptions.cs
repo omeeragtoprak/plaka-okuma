@@ -218,8 +218,19 @@ public sealed class AnprServiceOptions
     /// <summary>/events/recent için bellekte tutulacak maksimum olay sayısı.</summary>
     public int RecentEventsCapacity { get; set; } = 200;
 
-    /// <summary>Opsiyonel webhook: doluysa her olay bu URL'e POST edilir.</summary>
+    /// <summary>Opsiyonel webhook: doluysa her roi olayı bu URL'e POST edilir (kayıt kanalı:
+    /// başarısızlıkta disk kuyruğuna yazılır ve 2 dk'da bir sırayla yeniden denenir — olay kaybolmaz).</summary>
     public string? WebhookUrl { get; set; }
+
+    /// <summary>Webhook doluysa bu aralıkta sağlık kalp-atışı POST edilir (kamera durumu, sayaçlar). 0 = kapalı.</summary>
+    public int HeartbeatSeconds { get; set; } = 30;
+
+    /// <summary>events.jsonl KVKK saklama süresi (gün) — açılışta eski satırlar budanır. 0 = sınırsız.</summary>
+    public int EventRetentionDays { get; set; } = 30;
+
+    /// <summary>Dolu ise panel ve API uçları bu belirteci ister (?token= veya X-Anpr-Token başlığı).
+    /// Boş = koruma kapalı (geliştirme). Canlı sahada doldurulmalı (KVKK erişim kontrolü).</summary>
+    public string? PanelToken { get; set; }
 
     public FfmpegOptions Ffmpeg { get; set; } = new();
 

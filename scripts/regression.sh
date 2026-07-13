@@ -14,11 +14,12 @@ echo "=============================================================="
 echo "--- 1) Birim testler ---"
 dotnet test Anpr.Tests/Anpr.Tests.csproj -c Release 2>&1 | grep -E "Başarılı!|Başarısız|Passed|Failed" | tail -1
 
-echo "--- 2) diag4: kamera-referans (15 dk, poll gerçek-değeri; referans: erz 22/26, global 21/26) ---"
+echo "--- 2) diag4: kamera-referans (15 dk, poll gerçek-değeri; referans (üretim bayraklarıyla): erz 22/26 + gürültü 9) ---"
 python3 scripts/camera_compare.py --root "$PWD" \
   --cameras 192.168.5.14:giris,192.168.5.15:cikis --user admin --pw "${CAM_PW:?CAM_PW ortam değişkeni gerekli (kamera şifresi)}" \
   --t0-file dataset/diag4/t0_15.txt --t1-file dataset/diag4/t1_15.txt --clock-file dataset/diag4/clock_15.txt \
   --poll-dir dataset/diag4 --frames-root dataset/diag4 --fps-list 2 --fuzzy 1 --minconfirm 2 \
+  --spatialiou 0.35 --skipchar 0.3 --qblur 600 --qdark 0.85 --qbright 0.80 \
   --ocr "$OCR" | grep -E "TOPLAM"
 
 echo "--- 3) live1h: 101 etiketli araç (kareler 2026-07-11'de disk için silindi; labels.json duruyor) ---"
@@ -26,12 +27,13 @@ if ! find dataset/live1h -name "*.jpg" 2>/dev/null | head -1 | grep -q .; then
   echo "    atlandı (kare yok — yeniden yakalanırsa labels.json ile tekrar etiketlenebilir)"
 else
 dotnet run -c Release --no-build --project Anpr.Bench -- evaluate dataset/live1h dataset/live1h/labels.json \
-  --ocr "$OCR" --minocr 0.45 --emitfloor 0.45 --mergeprovince false --minconfirm 2 --fuzzy 1 --label reg 2>&1 \
+  --ocr "$OCR" --minocr 0.45 --emitfloor 0.45 --mergeprovince false --minconfirm 2 --fuzzy 1 \
+  --spatialiou 0.35 --skipchar 0.3 --qblur 600 --qdark 0.85 --qbright 0.80 --label reg 2>&1 \
   | grep -iE "Plaka tam|TOPLAM emit|Karakter|gecikme"
+fi
 
 if [ -f dataset/finetune/val.csv ] && "$PYENV" -c "import onnxruntime" 2>/dev/null; then
-  fi
-echo "--- 4) kırpıntı-exact (val + gece; referans: erz %75 / %84) ---"
+echo "--- 4) kırpıntı-exact (val + gece; referans: erz %76.4 / %84.0) ---"
   for CSV in val.csv night_all.csv; do
     [ -f "dataset/finetune/$CSV" ] || continue
     "$PYENV" - "$OCR" "dataset/finetune/$CSV" <<'PY'

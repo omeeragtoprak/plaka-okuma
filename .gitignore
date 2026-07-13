@@ -29,3 +29,4 @@ bench_out/
 # Eğitim ortamı (yeniden kurulabilir: README/finetune-runbook)
 .venv-train/
 publish-win/
+pilot-kit/

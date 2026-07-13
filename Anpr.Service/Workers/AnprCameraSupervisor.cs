@@ -32,6 +32,9 @@ public sealed partial class AnprCameraSupervisor : IHostedService
     }
     public DateTimeOffset StartedAtUtc { get; private set; }
 
+    /// <summary>CPUID/mimari özeti (arm64 ya da x64 + sse42/avx/avx2 bayrakları) — /health'te raporlanır.</summary>
+    public string CpuFeatures { get; private set; } = "";
+
     private readonly Events.FrequentPlateRegistry _frequent;
 
     public AnprCameraSupervisor(
@@ -57,6 +60,20 @@ public sealed partial class AnprCameraSupervisor : IHostedService
 
         _logger.LogInformation("ANPR başlıyor | dedektör={Det} | ocr={Ocr} | threads={Threads} | kameralar={Count}",
             Path.GetFileName(detector), Path.GetFileName(ocr), _options.OnnxIntraOpThreads, _options.Cameras.Count);
+
+        // CPUID/AVX probe (P1c): AVX'siz eski Intel'de 'illegal instruction' bilinen çökme sınıfı —
+        // durum açılışta loglanır ve /health'te raporlanır (hedef-PC pilotunun ilk verisi).
+        CpuFeatures = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
+        if (System.Runtime.Intrinsics.X86.X86Base.IsSupported)
+        {
+            CpuFeatures += $" sse42={System.Runtime.Intrinsics.X86.Sse42.IsSupported}" +
+                           $" avx={System.Runtime.Intrinsics.X86.Avx.IsSupported}" +
+                           $" avx2={System.Runtime.Intrinsics.X86.Avx2.IsSupported}";
+            if (!System.Runtime.Intrinsics.X86.Avx.IsSupported)
+                _logger.LogWarning("Bu CPU AVX DESTEKLEMİYOR — ONNX Runtime performansı düşük olabilir; " +
+                                   "OpenVINO 2026+ KULLANILAMAZ (AVX2 şart). Ölçüm sonuçlarını buna göre yorumlayın.");
+        }
+        _logger.LogInformation("CPU özellikleri: {Cpu}", CpuFeatures);
 
         // Model bütünlük kontrolü (yapılandırılmışsa): bozuk/yanlış sürüm modelle sessizce çalışmayı önler.
         VerifyModelHash(detector, _options.DetectorModelSha256, "dedektör");

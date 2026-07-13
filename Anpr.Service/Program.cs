@@ -1,4 +1,5 @@
 using System.Net;
+using Anpr.Service;
 using Anpr.Service.Configuration;
 using Anpr.Service.Panel;
 using Anpr.Service.Events;
@@ -64,6 +65,7 @@ if (!string.IsNullOrWhiteSpace(opts.WebhookUrl))
         sp.GetRequiredService<IHttpClientFactory>(),
         opts.WebhookUrl!,
         sp.GetRequiredService<ILogger<WebhookEventSink>>()));
+    builder.Services.AddHostedService<HeartbeatService>(); // kalp-atışı itmesi (E5)
 }
 
 // --- Canlı karşılaştırma paneli ---
@@ -78,6 +80,30 @@ builder.Services.AddSingleton<AnprCameraSupervisor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AnprCameraSupervisor>());
 
 var app = builder.Build();
+
+// Erişim koruması (G3): PanelToken doluysa panel/API uçları belirteç ister (?token= veya X-Anpr-Token).
+// /health açık kalır (izleme sistemleri için). Boş token = koruma kapalı (geliştirme).
+if (!string.IsNullOrWhiteSpace(opts.PanelToken))
+{
+    app.Use(async (ctx, next) =>
+    {
+        string path = ctx.Request.Path.Value ?? "";
+        bool korumali = path.StartsWith("/panel") || path.StartsWith("/api") ||
+                        path.StartsWith("/events") || path.StartsWith("/evidence");
+        if (korumali)
+        {
+            string? tok = ctx.Request.Query["token"].FirstOrDefault()
+                          ?? ctx.Request.Headers["X-Anpr-Token"].FirstOrDefault();
+            if (tok != opts.PanelToken)
+            {
+                ctx.Response.StatusCode = 401;
+                await ctx.Response.WriteAsync("token gerekli");
+                return;
+            }
+        }
+        await next();
+    });
+}
 
 // --- Endpoint'ler ---
 app.MapGet("/", () => Results.Json(new
@@ -97,6 +123,8 @@ app.MapGet("/health", (AnprCameraSupervisor sup) =>
         framesReceived = w.FramesReceived,
         framesProcessed = w.FramesProcessed,
         qualityDropped = w.QualityDropped,
+        frameMsP50 = w.FrameMsP50,
+        frameMsP95 = w.FrameMsP95,
         restartCount = w.RestartCount,
         eventsEmitted = w.EventsEmitted,
         lastEventUtc = w.LastEventUtc,
@@ -109,6 +137,7 @@ app.MapGet("/health", (AnprCameraSupervisor sup) =>
     return Results.Json(new
     {
         status,
+        cpu = sup.CpuFeatures,
         startedAtUtc = sup.StartedAtUtc,
         nowUtc = DateTimeOffset.UtcNow,
         cameras,
@@ -122,6 +151,43 @@ app.MapGet("/events/recent", (InMemoryEventStore store, int? count, string? scop
     if (!string.IsNullOrEmpty(scope))
         events = events.Where(e => e.Scope == scope).ToList();
     return Results.Json(new { total = store.TotalCount, returned = events.Count, events });
+});
+
+// Operatör düzeltmesi (FR-36): {eventId, correctedPlate} -> denetim izi (corrections.jsonl) +
+// kanıt kırpıntısı eğitim arşivine kopyalanır (dataset/corrections/<PLAKA>/) -> fine-tune verisi.
+app.MapPost("/api/correction", async (HttpRequest req, InMemoryEventStore store, ILogger<Program> log) =>
+{
+    using var reader = new StreamReader(req.Body);
+    var body = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(await reader.ReadToEndAsync());
+    if (body == null || !body.TryGetValue("eventId", out var ids) || !Guid.TryParse(ids, out var id) ||
+        !body.TryGetValue("correctedPlate", out var plate) || string.IsNullOrWhiteSpace(plate))
+        return Results.BadRequest(new { error = "eventId (guid) ve correctedPlate gerekli" });
+
+    string compact = new string(plate.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+    var evt = store.GetRecent(int.MaxValue).FirstOrDefault(e => e.EventId == id);
+
+    var rec = new
+    {
+        at = DateTimeOffset.Now, eventId = id, original = evt?.PlateCompact,
+        corrected = compact, evidence = evt?.EvidencePath,
+    };
+    await File.AppendAllTextAsync(Path.Combine(AppContext.BaseDirectory, "corrections.jsonl"),
+        System.Text.Json.JsonSerializer.Serialize(rec) + Environment.NewLine);
+
+    string? archived = null;
+    if (evt?.EvidencePath is { } ev)
+    {
+        string src = Path.Combine(AppContext.BaseDirectory, ev);
+        if (File.Exists(src))
+        {
+            string dir = Path.Combine(AppContext.BaseDirectory, "dataset-corrections", compact);
+            Directory.CreateDirectory(dir);
+            archived = Path.Combine(dir, Path.GetFileName(src));
+            File.Copy(src, archived, overwrite: true);
+        }
+    }
+    log.LogInformation("düzeltme kaydı: {Id} '{Orig}' -> '{New}' (kanıt: {Ev})", id, evt?.PlateCompact, compact, archived ?? "yok");
+    return Results.Json(new { ok = true, original = evt?.PlateCompact, corrected = compact, archivedEvidence = archived != null });
 });
 
 // Kanıt kırpıntıları (panel küçük resimleri). Dosya adı sıkı doğrulanır (path traversal yok).

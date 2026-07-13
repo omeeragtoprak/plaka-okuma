@@ -92,6 +92,8 @@ public static class PanelPage
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
+const TOKEN=new URLSearchParams(location.search).get("token");
+const withTok=u=>TOKEN?u+(u.includes("?")?"&":"?")+"token="+encodeURIComponent(TOKEN):u;
 let cams=[], cam=null;
 const feed={};
 let roi=[], roiDraft=null;
@@ -182,7 +184,7 @@ function row(r,side){
   if(side==="ours"&&r.low)tag+=' <span class="scopetag lowconf" title="güven eşiğin altında — operatör onayı önerilir">düşük güven</span>';
   if(side==="cam"&&r.cross)tag+=' <span class="scopetag" title="bizim diğer kamera okudu">⇄ diğer kamera</span>';
   const times=r.n>1?" ×"+r.n:"";
-  const thumb=side==="ours"&&r.ev?`<a href="/${r.ev}" target="_blank"><img class="thumb" src="/${r.ev}" alt=""></a>`:"";
+  const thumb=side==="ours"&&r.ev?`<a href="${withTok("/"+r.ev)}" target="_blank"><img class="thumb" src="${withTok("/"+r.ev)}" alt=""></a>`:"";
   if(side==="ours"&&r.cands)d.title="adaylar: "+r.cands;
   d.innerHTML=`<span class="plate">${r.plate}</span>${tag}${thumb}
     <span class="meta">${time}${times}${side==="ours"&&r.conf!=null?"<br>güven "+r.conf:""}</span>`;
@@ -202,7 +204,7 @@ function render(){
 // ---- SSE ----
 let es=null, retry=1000;
 function connect(){
-  es=new EventSource("/api/stream");
+  es=new EventSource(withTok("/api/stream"));
   es.onopen=()=>{retry=1000;$("svcBadge").innerHTML='servis: <b style="color:var(--green)">bağlı</b>';};
   es.onerror=()=>{es.close();$("svcBadge").innerHTML='servis: <b style="color:var(--red)">koptu</b>';
     setTimeout(connect,retry);retry=Math.min(retry*2,15000);};
@@ -221,7 +223,7 @@ function connect(){
 // ---- Sayfa-açılış dolumu (yenilemede tablo boş kalmasın) ----
 async function backfill(){
   try{
-    const ev=await(await fetch("/events/recent?count=100")).json();
+    const ev=await(await fetch(withTok("/events/recent?count=100"))).json();
     // API en-yeni-önce döner; tampon kronolojik tutulur (render sonda ters çevirir) -> eskiden yeniye it.
     for(const e of (ev.events||[]).slice().reverse()){
       const f=ensure(e.cameraId);
@@ -231,7 +233,7 @@ async function backfill(){
   }catch{}
   for(const c of cams){
     try{
-      const d=await(await fetch(`/api/camera/recent?cameraId=${c.id}`)).json();
+      const d=await(await fetch(withTok(`/api/camera/recent?cameraId=${c.id}`))).json();
       const f=ensure(c.id);
       for(const r of d.records||[])
         push(f,"cam",{plate:r.plate,t:Date.parse(r.timeIso)},"camera|"+r.plate+"|"+r.timeIso);
@@ -241,7 +243,7 @@ async function backfill(){
 
 // ---- Canlı video (MJPEG) + overlay ----
 function setStream(){
-  live.src=`/api/mjpeg/${cam}?t=${Date.now()}`;
+  live.src=withTok(`/api/mjpeg/${cam}?t=${Date.now()}`);
 }
 live.addEventListener("load",()=>{ natW=live.naturalWidth; natH=live.naturalHeight; });
 function syncCanvas(){
@@ -282,7 +284,7 @@ function draw(){
 async function pollDetections(){
   if(!cam)return;
   try{
-    const d=await(await fetch(`/api/detections/${cam}`)).json();
+    const d=await(await fetch(withTok(`/api/detections/${cam}`))).json();
     lastBoxes=d.boxes||[];
     if(!roiDraft){ roi=parseRoi(d.roi); $("roiBadge").textContent = roi.length?`ROI: kayıtlı ✓ (${roi.length} nokta)`:"ROI: yok (tüm kare)"; }
   }catch{}
@@ -305,7 +307,7 @@ cv.addEventListener("dblclick",e=>{ if(roiDraft&&roiDraft.length>=3){e.preventDe
 $("roiDraw").onclick=()=>{roiDraft=[];$("roiSave").disabled=true;$("roiCancel").disabled=false;};
 $("roiCancel").onclick=()=>{roiDraft=null;$("roiSave").disabled=true;$("roiCancel").disabled=true;};
 $("roiSave").onclick=async()=>{
-  await fetch(`/api/roi/${cam}`,{method:"PUT",headers:{"Content-Type":"application/json"},
+  await fetch(withTok(`/api/roi/${cam}`),{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({roi:roiToStr(roiDraft)})});
   roi=roiDraft; roiDraft=null;
   $("roiSave").disabled=true;$("roiCancel").disabled=true;
@@ -313,7 +315,7 @@ $("roiSave").onclick=async()=>{
 };
 $("roiClear").onclick=async()=>{
   if(!confirm("Bu kameranın ROI'si temizlensin mi? (Tüm kare okunur)"))return;
-  await fetch(`/api/roi/${cam}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({roi:""})});
+  await fetch(withTok(`/api/roi/${cam}`),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({roi:""})});
   roi=[];roiDraft=null;$("roiBadge").textContent="ROI: yok (tüm kare)";
 };
 

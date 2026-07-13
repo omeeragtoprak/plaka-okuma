@@ -49,6 +49,22 @@ public sealed class CameraWorker : IAsyncDisposable
     public long FramesReceived => _frameSource.FramesReceived;
     public int RestartCount => _frameSource.RestartCount;
     public long FramesProcessed { get; private set; }
+
+    // Kayan pencere kare-işleme süresi (son 200 kare) — hedef-PC pilotunda darboğaz teşhisi için.
+    private readonly double[] _frameMs = new double[200];
+    private int _frameMsIdx;
+    private int _frameMsCount;
+    public double FrameMsP50 => FrameMsPercentile(0.50);
+    public double FrameMsP95 => FrameMsPercentile(0.95);
+    private double FrameMsPercentile(double q)
+    {
+        int n = Math.Min(_frameMsCount, _frameMs.Length);
+        if (n == 0) return 0;
+        var copy = new double[n];
+        Array.Copy(_frameMs, copy, n);
+        Array.Sort(copy);
+        return Math.Round(copy[(int)((n - 1) * q)], 1);
+    }
     public long EventsEmitted { get; private set; }
 
     // Panel: son işlenen kare (ffmpeg'den gelen JPEG bytes — kopyasız) + son tespit kutuları.
@@ -127,7 +143,11 @@ public sealed class CameraWorker : IAsyncDisposable
             {
                 try
                 {
+                    var swf = System.Diagnostics.Stopwatch.StartNew();
                     if (ObserveFrame(frame, now)) activeUntil = now + activeHold; // tespit -> aktif moda geç
+                    _frameMs[_frameMsIdx] = swf.Elapsed.TotalMilliseconds;
+                    _frameMsIdx = (_frameMsIdx + 1) % _frameMs.Length;
+                    if (_frameMsCount < _frameMs.Length) _frameMsCount++;
                 }
                 catch (Exception ex) { _logger.LogWarning("[{Cam}] kare işleme hatası: {Msg}", _camera.Id, ex.Message); }
             }

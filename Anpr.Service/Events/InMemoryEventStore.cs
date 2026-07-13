@@ -16,12 +16,14 @@ public sealed class InMemoryEventStore : IEventSink
     private readonly LinkedList<PlateEvent> _events = new();
     private readonly object _lock = new();
     private readonly string _persistPath;
+    private readonly int _retentionDays;
 
     private long _totalCount;
 
     public InMemoryEventStore(IOptions<AnprServiceOptions> options)
     {
         _capacity = Math.Max(1, options.Value.RecentEventsCapacity);
+        _retentionDays = options.Value.EventRetentionDays;
         _persistPath = Path.Combine(AppContext.BaseDirectory, "events.jsonl");
         LoadPersisted();
     }
@@ -31,15 +33,30 @@ public sealed class InMemoryEventStore : IEventSink
         try
         {
             if (!File.Exists(_persistPath)) return;
-            var lines = File.ReadLines(_persistPath).TakeLast(_capacity);
-            foreach (var line in lines)
+
+            // KVKK saklama + dosya büyümesi: açılışta saklama süresi (EventRetentionDays) dolan
+            // satırlar atılır ve dosya yalnız tutulanlarla YENİDEN yazılır (aksi halde sınırsız büyür).
+            var cutoff = _retentionDays > 0 ? DateTimeOffset.Now.AddDays(-_retentionDays) : DateTimeOffset.MinValue;
+            var kept = new List<string>();
+            foreach (var line in File.ReadLines(_persistPath))
+            {
+                try
+                {
+                    var e = JsonSerializer.Deserialize<PlateEvent>(line);
+                    if (e != null && e.Timestamp >= cutoff) kept.Add(line);
+                }
+                catch { /* bozuk satır atlanır */ }
+            }
+            File.WriteAllLines(_persistPath, kept);
+
+            foreach (var line in kept.TakeLast(_capacity))
             {
                 var e = JsonSerializer.Deserialize<PlateEvent>(line);
                 if (e != null) _events.AddFirst(e);
             }
             _totalCount = _events.Count;
         }
-        catch { /* bozuk satır/dosya: temiz başla */ }
+        catch { /* bozuk dosya: temiz başla */ }
     }
 
     public long TotalCount => Interlocked.Read(ref _totalCount);

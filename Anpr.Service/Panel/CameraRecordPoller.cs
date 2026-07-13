@@ -29,6 +29,20 @@ public sealed partial class CameraRecordPoller : BackgroundService
     public IReadOnlyList<CamEvent> Recent(string cameraId)
         => _recent.TryGetValue(cameraId, out var q) ? q.ToArray() : Array.Empty<CamEvent>();
 
+    // camera-records.jsonl: kameranın kendi ANPR kayıtlarının kalıcı izi (saat-düzeltilmiş).
+    // Haftalık gölge-eşleşme raporu ve gece-parite ölçümleri bu dosyadan retrospektif üretilir.
+    private static readonly object _persistLock = new();
+    private static void PersistCamera(CamEvent e)
+    {
+        try
+        {
+            lock (_persistLock)
+                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "camera-records.jsonl"),
+                    System.Text.Json.JsonSerializer.Serialize(e) + Environment.NewLine);
+        }
+        catch { /* disk hatası kaydı düşürmesin */ }
+    }
+
     private void Remember(CamEvent e)
     {
         var q = _recent.GetOrAdd(e.CameraId, _ => new ConcurrentQueue<CamEvent>());
@@ -93,6 +107,7 @@ public sealed partial class CameraRecordPoller : BackgroundService
             var localTime = rec.CaptureTime - st.ClockOffset;
             var ce = new CamEvent(st.Cam.Id, rec.Plate, localTime.ToString("o"));
             Remember(ce); // sayfa-dolumu tamponu (ilk turdaki tarih dahil)
+            PersistCamera(ce); // kalıcı iz: gölge-raporu ve gece-parite retrospektif analizleri için
             if (st.FirstPoll) continue; // tarihi CANLI akışa basma
             _hub.Publish(new { source = "camera", cameraId = ce.CameraId, plate = ce.Plate, compact = ce.Plate, timeIso = ce.TimeIso });
         }
