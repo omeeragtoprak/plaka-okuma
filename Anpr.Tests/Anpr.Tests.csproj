@@ -23,6 +23,9 @@
     <ProjectReference Include="..\Anpr.Core\Anpr.Core.csproj" />
     <ProjectReference Include="..\Anpr.Service\Anpr.Service.csproj" />
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
+    <!-- Linux CI (GitHub Actions ubuntu runner): SkiaSharp native + fontconfig'siz varyant, yoksa
+         uçtan-uca test 'libSkiaSharp bulunamadı' ile patlar. Linux dışında atıl; test paketlenmiyor. -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="2.88.8" />
   </ItemGroup>
 
   <!-- Models + a sample car image for the end-to-end recognition test. -->
