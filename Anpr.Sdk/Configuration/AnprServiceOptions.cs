@@ -152,18 +152,20 @@ public sealed class AnprServiceOptions
     public int CandidateCount { get; set; } = 5;
 
     /// <summary>
-    /// Yalnız YAKLAŞAN aracı yayınla: izin plaka-kutusu alanı ömrü boyunca BELİRGİN küçülüyorsa
-    /// (araç uzaklaşıyor) roi olayı bastırılır. Kutu alanı = mesafe göstergesi (yaklaşınca büyür).
-    /// Recall-öncelikli: yalnız güçlü küçülme sinyalinde bastırır; kararsız/kısa izler daima geçer.
+    /// Yalnız YAKLAŞAN aracı yayınla: DirectionTracker plaka GENİŞLİĞİ eğilimini (OCR'dan bağımsız, her
+    /// tespit kutusundan) izler; iz belirgin küçülüyorsa (araç uzaklaşıyor, arka plaka) roi olayı
+    /// bastırılır. Recall-öncelikli: kararsız/kısa izler (trend=-1) daima geçer. Hikvision "Yön: İleri"
+    /// filtresinin CPU-dostu muadili. Kapatmak: false.
     /// </summary>
     public bool RequireApproaching { get; set; } = true;
 
-    /// <summary>Uzaklaşıyor eşiği: son/erken kutu-alanı oranı bu değerin ALTINDAYSA "uzaklaşıyor" sayılır
-    /// (0.70 = plaka %30+ küçülmüş). Düşürmek daha katı bastırma, yükseltmek daha az. SizeTrend=-1 (kararsız) geçer.</summary>
-    public float ApproachDepartRatio { get; set; } = 0.70f;
+    /// <summary>Uzaklaşıyor eşiği: son-yarı-max / erken-yarı-max plaka GENİŞLİK oranı bu değerin ALTINDAYSA
+    /// "uzaklaşıyor" sayılır. Yarı-başına-max mülayim küçülmeyi yumuşattığı için 0.85 (belirgin küçülmeyi
+    /// yakalar, yaklaşan/sabit izlere ~1.0'a güvenli marj bırakır). trend=-1 (kararsız) geçer. Ölçümle ayarla.</summary>
+    public float ApproachDepartRatio { get; set; } = 0.85f;
 
-    /// <summary>Yön kararı için gereken asgari kutu-alanı örneği (yarı-başına-max sağlamlığı için ≥4).
-    /// 2 fps'te araç ~2 karede emit olduğundan, filtre açıkken emit bu kadar kare birikene dek TUTULUR
+    /// <summary>Yön kararı için gereken asgari genişlik örneği (yarı-başına-max sağlamlığı için ≥4).
+    /// 2 fps'te araç ~2 karede emit olduğundan, filtre açıkken emit bu kadar kere görülene dek TUTULUR
     /// (settle'da her hâlükârda yayınlanır) — böylece yön tek/iki kareye değil yeterli kareye dayanır.</summary>
     public int ApproachMinSamples { get; set; } = 4;
 

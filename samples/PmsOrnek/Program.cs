@@ -20,6 +20,9 @@ var options = new AnprServiceOptions();   // üretimde doğrulanmış varsayıla
 // Ölçüm modu: ANPR_REQUIRE_APPROACHING=false ile filtre kapatılıp ham SizeTrend gözlemlenebilir.
 if (string.Equals(Environment.GetEnvironmentVariable("ANPR_REQUIRE_APPROACHING"), "false", StringComparison.OrdinalIgnoreCase))
     options.RequireApproaching = false;
+// Deney: ANPR_FPS ile işleme kare hızını dene (yön için daha çok örnek). Boşsa varsayılan (2).
+if (double.TryParse(Environment.GetEnvironmentVariable("ANPR_FPS"), out var fps) && fps > 0)
+    { options.Fps = fps; options.IdleFps = Math.Min(fps, options.IdleFps + 1); }
 if (giris != null) options.Cameras.Add(new CameraOptions { Id = "giris", Name = "Giriş", RtspUrl = giris });
 if (cikis != null) options.Cameras.Add(new CameraOptions { Id = "cikis", Name = "Çıkış", RtspUrl = cikis });
 

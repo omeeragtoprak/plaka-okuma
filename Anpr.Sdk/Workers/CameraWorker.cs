@@ -23,6 +23,7 @@ public sealed class CameraWorker : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly PlateConfirmer _confirmer;
     private readonly PlateConfirmer _obsConfirmer; // ROI dışı "gözlem" okumaları (bariyer kararına girmez)
+    private readonly DirectionTracker _direction;  // OCR'dan bağımsız yaklaşan/uzaklaşan yön izleyici (roi)
     private readonly List<Task> _pendingPublishes = new();
 
     // Çok-kareli füzyon: iz başına en iyi kırpıntılar (yalnız bölge-içi; düşük güvenli emitte füzyon denenir).
@@ -118,13 +119,16 @@ public sealed class CameraWorker : IAsyncDisposable
             SpatialMergeIou = options.SpatialMergeIou,
             SkipCharLevel = options.SkipCharLevel,
             CandidateCount = options.CandidateCount,
-            ApproachMinSamples = options.ApproachMinSamples,
-            ApproachMinSpan = TimeSpan.FromSeconds(Math.Max(0, options.ApproachMinSpanSeconds)),
             // Yalnız-yaklaşan filtresi açıksa, roi izini yön için yeterli kare birikene dek tut.
             ApproachHoldSamples = hold && options.RequireApproaching ? Math.Max(4, options.ApproachMinSamples) : 0,
         };
         _confirmer = new PlateConfirmer(MakeOpts(hold: true));
         _obsConfirmer = new PlateConfirmer(MakeOpts(hold: false));
+        _direction = new DirectionTracker(new DirectionTrackerOptions
+        {
+            MinSamples = Math.Max(4, options.ApproachMinSamples),
+            MinSpan = TimeSpan.FromSeconds(Math.Max(0, options.ApproachMinSpanSeconds)),
+        });
     }
 
     public void Start(CancellationToken cancellationToken)
@@ -211,6 +215,10 @@ public sealed class CameraWorker : IAsyncDisposable
         bool zoneDetection = false;
         foreach (var r in readings)
         {
+            // Yön izleyiciye HER tespit kutusunu besle (ROI-içi + ROI-dışı, OCR geçerli olsun olmasın):
+            // aracın TÜM yaklaşma yörüngesini yakala (uzakta küçük -> yakında büyük). Dar ROI'ye
+            // sıkışmaz; uzaklaşan arka plaka OCR'lanamasa bile kutusu görünür -> yoğun yön verisi.
+            _direction.Observe(r.Box, now);
             if (r.InZone) zoneDetection = true;
             if (!r.IsValidTr) continue;                          // çöp/geçersiz okumaları gönderme
             if (r.Confidence < _options.EmitMinConfidence) continue;
@@ -461,13 +469,17 @@ public sealed class CameraWorker : IAsyncDisposable
 
     private void Emit(PlateReading best, DateTimeOffset now, string scope)
     {
+        // Yön: OCR'dan bağımsız yön-izleyiciden plaka GENİŞLİĞİ eğilimi (son/erken yarı-max).
+        // >1 yaklaşıyor, <1 uzaklaşıyor, -1 kararsız (yeterli kare yok). Yalnız roi izleri için anlamlı.
+        float trend = scope == "roi" ? _direction.TrendFor(best.Box, now) : -1f;
+
         // Yalnız YAKLAŞAN araç: iz belirgin küçülüyorsa (uzaklaşıyor) roi olayını hiç üretme.
-        // SizeTrend=-1 (kararsız/kısa iz) veya ≥eşik → geçer (recall-öncelikli). Gözlem kapsamı gatelenmez.
+        // trend=-1 (kararsız/kısa iz) veya ≥eşik → geçer (recall-öncelikli). Gözlem kapsamı gatelenmez.
         if (scope == "roi" && _options.RequireApproaching
-            && best.SizeTrend >= 0 && best.SizeTrend < _options.ApproachDepartRatio)
+            && trend >= 0 && trend < _options.ApproachDepartRatio)
         {
-            _logger.LogInformation("[{Cam}] uzaklaşan araç bastırıldı: '{Plate}' (alan-eğilimi {Trend:F2} < {Th:F2})",
-                _camera.Id, best.Text, best.SizeTrend, _options.ApproachDepartRatio);
+            _logger.LogInformation("[{Cam}] uzaklaşan araç bastırıldı: '{Plate}' (genişlik-eğilimi {Trend:F2} < {Th:F2})",
+                _camera.Id, best.Text, trend, _options.ApproachDepartRatio);
             return;
         }
 
@@ -540,7 +552,7 @@ public sealed class CameraWorker : IAsyncDisposable
             FramePath = framePath,
             LowConfidence = best.OcrConfidence < _options.ManualReviewMinOcr,
             Candidates = best.Candidates,
-            SizeTrend = best.SizeTrend,
+            SizeTrend = trend,
         };
 
         EventsEmitted++;

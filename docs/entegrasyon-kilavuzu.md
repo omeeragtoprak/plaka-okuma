@@ -97,10 +97,13 @@ Otopark PC'si
 }
 ```
 
-> **Yön filtresi (v1.0.1)**: `RequireApproaching=true` (varsayılan) iken UZAKLAŞAN araç (plaka kutusu
-> belirgin küçülen iz) için roi olayı hiç üretilmez — yalnız kameraya YAKLAŞAN araçlar yayınlanır.
-> Kutu-alanı yarı-başına-max ile ölçülür (tek kırpık kare yanıltmaz); karar için yeterli kare birikene
-> dek emit kısa süre tutulur, en geç settle'da yayınlanır (yaklaşan araç asla kaçırılmaz). Kapatmak:
+> **Yön filtresi (v1.0.2)**: `RequireApproaching=true` (varsayılan) iken UZAKLAŞAN araç (arka plaka)
+> için roi olayı hiç üretilmez — yalnız kameraya YAKLAŞAN araçlar yayınlanır (Hikvision "Yön: İleri"
+> filtresinin CPU-dostu muadili). Yön, **DirectionTracker** ile ölçülür: OCR'dan bağımsız olarak aracın
+> TÜM yaklaşma yörüngesindeki her plaka tespit kutusu izlenir (centroid eşleştirme, IoU değil — 2 fps'te
+> sağlam) ve plaka GENİŞLİĞİ eğilimi (son-yarı-max / erken-yarı-max; tek kırpık kare yanıltmaz)
+> hesaplanır. Karar için yeterli kare birikene dek emit kısa tutulur, en geç settle'da yayınlanır
+> (yaklaşan araç asla kaçırılmaz). Kararsız/kısa izler (`SizeTrend=-1`) daima geçer. Kapatmak:
 > `RequireApproaching=false`. `SizeTrend` her olayda taşınır; tam-kare kanıtıyla eşiği ayarlamak için.
 
 PMS iş kuralları:

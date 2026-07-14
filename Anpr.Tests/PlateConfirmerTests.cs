@@ -316,134 +316,150 @@ public class SpatialMergeTests
     }
 }
 
-public class ApproachTrendTests
+public class DirectionTrackerTests
 {
-    // Kare boyutu (w=h) verilen okuma; alan = w². Aynı plaka -> tek ize düşer, alan serisi birikir.
-    private static PlateReading Reading(int side, float conf = 0.9f) => ReadingWH(side, side, conf);
+    // Verilen plaka GENİŞLİĞİ ile kutu (yükseklik sabit); centroid aynı yerde -> tek ize düşer.
+    private static PlateBox Box(int width, int x = 100) => new PlateBox(x, 100, width, 30);
 
-    private static PlateReading ReadingWH(int w, int h, float conf = 0.9f) => new()
+    private static DirectionTracker New(int minSamples = 4, double minSpanSec = 0.6) => new(new DirectionTrackerOptions
     {
-        Text = "25 ABC 123",
-        RawText = "25ABC123",
-        Confidence = conf,
-        DetectorConfidence = conf,
-        OcrConfidence = conf,
-        Box = new PlateBox(100, 100, w, h),
-        IsValidTr = true,
+        MinSamples = minSamples,
+        MinSpan = TimeSpan.FromSeconds(minSpanSec),
+    });
+
+    [Fact]
+    public void Growing_width_is_approaching_trend_above_one()
+    {
+        var d = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[] w = { 40, 45, 50, 55, 60 };                    // plaka genişliği büyüyor -> yaklaşıyor
+        for (int i = 0; i < w.Length; i++) d.Observe(Box(w[i]), t.AddSeconds(0.2 * i));
+        float trend = d.TrendFor(Box(60), t.AddSeconds(0.8));
+        Assert.True(trend > 1.2f, $"yaklaşan iz trend>1 olmalı, geldi {trend}");
+    }
+
+    [Fact]
+    public void Shrinking_width_is_departing_trend_below_depart_ratio()
+    {
+        var d = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[] w = { 60, 50, 40, 30, 20 };                    // plaka genişliği belirgin küçülüyor -> uzaklaşıyor
+        for (int i = 0; i < w.Length; i++) d.Observe(Box(w[i]), t.AddSeconds(0.2 * i));
+        float trend = d.TrendFor(Box(20), t.AddSeconds(0.8)); // early-max 60, recent-max 40 -> 0.67
+        Assert.True(trend is >= 0 and < 0.70f, $"uzaklaşan iz trend<0.70 olmalı, geldi {trend}");
+    }
+
+    [Fact]
+    public void Approaching_with_one_cropped_frame_not_flagged_departing()
+    {
+        // KRİTİK sağlamlık: yaklaşan araç (genişlik büyüyor) ama SON kare kadraj-kenarına taşıp kırpıldı
+        // (genişlik aniden küçük). Yarı-başına-MAX tek kırpık kareyi yutar -> trend≥1, BASTIRILMAZ.
+        var d = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[] w = { 40, 50, 60, 22 };                        // büyüyor sonra kırpık son kare
+        for (int i = 0; i < w.Length; i++) d.Observe(Box(w[i]), t.AddSeconds(0.2 * i));
+        float trend = d.TrendFor(Box(22), t.AddSeconds(0.6));
+        Assert.True(trend >= 1f, $"kırpık son kareye rağmen trend≥1 olmalı, geldi {trend}");
+    }
+
+    [Fact]
+    public void Flat_width_trend_near_one()
+    {
+        var d = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        for (int i = 0; i < 5; i++) d.Observe(Box(50), t.AddSeconds(0.2 * i));
+        float trend = d.TrendFor(Box(50), t.AddSeconds(0.8));
+        Assert.True(Math.Abs(trend - 1f) < 0.01f, $"sabit iz trend≈1 olmalı, geldi {trend}");
+    }
+
+    [Fact]
+    public void Too_few_samples_is_unknown_minus_one()
+    {
+        var d = New(minSamples: 4);
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        d.Observe(Box(40), t);
+        d.Observe(Box(60), t.AddSeconds(0.3));               // yalnız 2 örnek < 4
+        Assert.Equal(-1f, d.TrendFor(Box(60), t.AddSeconds(0.3)));
+    }
+
+    [Fact]
+    public void Short_span_is_unknown_minus_one()
+    {
+        var d = New(minSpanSec: 0.6);
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[] w = { 40, 45, 50, 55 };
+        for (int i = 0; i < w.Length; i++) d.Observe(Box(w[i]), t.AddSeconds(0.1 * i)); // span 0.3s < 0.6
+        Assert.Equal(-1f, d.TrendFor(Box(55), t.AddSeconds(0.3)));
+    }
+
+    [Fact]
+    public void Distant_box_does_not_match_unknown()
+    {
+        // Farklı konumdaki kutu (uzak centroid) ize eşleşmez -> -1 (yanlış izden yön çekmez).
+        var d = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[] w = { 40, 50, 60, 60 };
+        for (int i = 0; i < w.Length; i++) d.Observe(Box(w[i], x: 100), t.AddSeconds(0.2 * i));
+        Assert.Equal(-1f, d.TrendFor(Box(60, x: 900), t.AddSeconds(0.6))); // çok uzakta
+    }
+
+    [Fact]
+    public void Two_separate_vehicles_tracked_independently()
+    {
+        var d = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        // Sol: yaklaşıyor (büyüyor), Sağ: uzaklaşıyor (küçülüyor)
+        int[] left = { 40, 50, 60, 60 }; int[] right = { 60, 50, 40, 40 };
+        for (int i = 0; i < 4; i++)
+        {
+            d.Observe(Box(left[i], x: 100), t.AddSeconds(0.2 * i));
+            d.Observe(Box(right[i], x: 900), t.AddSeconds(0.2 * i));
+        }
+        Assert.True(d.TrendFor(Box(60, x: 100), t.AddSeconds(0.6)) > 1f, "sol iz yaklaşıyor olmalı");
+        Assert.True(d.TrendFor(Box(40, x: 900), t.AddSeconds(0.6)) < 0.70f, "sağ iz uzaklaşıyor olmalı");
+    }
+}
+
+public class ApproachHoldTests
+{
+    private static PlateReading Reading(string text, float conf = 0.9f) => new()
+    {
+        Text = text, RawText = text.Replace(" ", ""),
+        Confidence = conf, DetectorConfidence = conf, OcrConfidence = conf,
+        Box = new PlateBox(100, 100, 50, 30), IsValidTr = true,
     };
 
-    private static PlateConfirmer New(int minSamples = 4, double minSpanSec = 0.6, int holdSamples = 0) => new(new PlateConfirmerOptions
+    private static PlateConfirmer New(int holdSamples) => new(new PlateConfirmerOptions
     {
         DedupWindow = TimeSpan.FromSeconds(8),
         SettleWindow = TimeSpan.FromSeconds(3),
         MinConfirmations = 2,
-        CharacterVoting = false, // SizeTrend'i izole ölç (dağılım oylaması bu teste karışmasın)
-        ApproachMinSamples = minSamples,
-        ApproachMinSpan = TimeSpan.FromSeconds(minSpanSec),
         ApproachHoldSamples = holdSamples,
     });
 
     [Fact]
-    public void Growing_box_yields_trend_above_one_approaching()
+    public void Hold_defers_emit_until_enough_observations()
     {
-        var c = New();
-        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
-        int[] sides = { 40, 45, 50, 55, 60 };               // alan 1600 -> 3600 (yaklaşıyor)
-        for (int i = 0; i < sides.Length; i++) c.Observe(Reading(sides[i]), t.AddSeconds(0.2 * i));
-        var ready = c.DrainReady(t.AddSeconds(0.8));
-        Assert.Single(ready);
-        Assert.True(ready[0].SizeTrend > 1.5f, $"yaklaşan iz için trend>1 beklenirdi, geldi {ready[0].SizeTrend}");
-    }
-
-    [Fact]
-    public void Shrinking_box_yields_trend_below_depart_ratio_departing()
-    {
-        var c = New();
-        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
-        int[] sides = { 60, 55, 50, 45, 40 };               // alan 3600 -> 1600 (uzaklaşıyor)
-        for (int i = 0; i < sides.Length; i++) c.Observe(Reading(sides[i]), t.AddSeconds(0.2 * i));
-        var ready = c.DrainReady(t.AddSeconds(0.8));
-        Assert.Single(ready);
-        Assert.True(ready[0].SizeTrend is >= 0 and < 0.70f, $"uzaklaşan iz için trend<0.70 beklenirdi, geldi {ready[0].SizeTrend}");
-    }
-
-    [Fact]
-    public void Too_few_samples_yields_unknown_minus_one()
-    {
-        var c = New(minSamples: 4);
-        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
-        c.Observe(Reading(40), t);
-        c.Observe(Reading(60), t.AddSeconds(0.3));           // yalnız 2 örnek (<4) -> karar verilemez
-        var ready = c.DrainReady(t.AddSeconds(4));           // settle ile yayınla
-        Assert.Single(ready);
-        Assert.Equal(-1f, ready[0].SizeTrend);
-    }
-
-    [Fact]
-    public void Short_span_yields_unknown_minus_one()
-    {
-        var c = New(minSpanSec: 0.6);
-        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
-        int[] sides = { 40, 45, 50, 55 };
-        for (int i = 0; i < sides.Length; i++) c.Observe(Reading(sides[i]), t.AddSeconds(0.1 * i)); // span 0.3s < 0.6
-        var ready = c.DrainReady(t.AddSeconds(4));
-        Assert.Single(ready);
-        Assert.Equal(-1f, ready[0].SizeTrend);
-    }
-
-    [Fact]
-    public void Flat_box_yields_trend_near_one()
-    {
-        var c = New();
-        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
-        for (int i = 0; i < 5; i++) c.Observe(Reading(50), t.AddSeconds(0.2 * i)); // sabit boyut
-        var ready = c.DrainReady(t.AddSeconds(0.8));
-        Assert.Single(ready);
-        Assert.True(Math.Abs(ready[0].SizeTrend - 1f) < 0.05f, $"sabit iz için trend≈1 beklenirdi, geldi {ready[0].SizeTrend}");
-    }
-
-    [Fact]
-    public void Approaching_with_cropped_final_frame_not_flagged_departing()
-    {
-        // KRİTİK sağlamlık: yaklaşan araç (alan büyüyor) ama SON kare kadraj-kenarına taşıp kırpıldı
-        // (alan aniden küçük). Yarı-başına-MAX sayesinde tek kırpık kare max'ı etkilemez → trend≥1,
-        // araç BASTIRILMAZ. (Uç-nokta oranıyla eski kod bunu 'uzaklaşıyor' sanıp bariyer olayını kaçırırdı.)
-        var c = New();
-        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
-        int[,] wh = { {40,40}, {50,50}, {60,60}, {60,17} }; // alan 1600,2500,3600, kırpık son kare ~1020
-        for (int i = 0; i < 4; i++) c.Observe(ReadingWH(wh[i,0], wh[i,1]), t.AddSeconds(0.2 * i));
-        var ready = c.DrainReady(t.AddSeconds(0.6));
-        Assert.Single(ready);
-        Assert.True(ready[0].SizeTrend >= 1f, $"kırpık son kareye rağmen yaklaşan iz trend≥1 olmalı, geldi {ready[0].SizeTrend}");
-    }
-
-    [Fact]
-    public void Hold_defers_emit_until_enough_direction_samples()
-    {
-        // Emit tutma: onay 2'de dolsa da, yön için 4 alan örneği birikene dek yayınlanmaz.
+        // Onay 2'de dolsa da, yön için 4 kez görülene dek yayınlanmaz (DirectionTracker'a kare kazandırır).
         var c = New(holdSamples: 4);
         var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
-        c.Observe(Reading(40), t);
-        c.Observe(Reading(45), t.AddSeconds(0.2));
-        Assert.Empty(c.DrainReady(t.AddSeconds(0.2)));          // onaylı ama 2 örnek < 4 -> tutuldu
-        c.Observe(Reading(50), t.AddSeconds(0.4));
-        c.Observe(Reading(55), t.AddSeconds(0.6));
-        var ready = c.DrainReady(t.AddSeconds(0.6));            // 4 örnek -> yayınla
-        Assert.Single(ready);
-        Assert.True(ready[0].SizeTrend > 1f);                    // yaklaşıyor
+        c.Observe(Reading("25 ABC 123"), t);
+        c.Observe(Reading("25 ABC 123"), t.AddSeconds(0.2));
+        Assert.Empty(c.DrainReady(t.AddSeconds(0.2)));          // onaylı ama 2 görülme < 4 -> tutuldu
+        c.Observe(Reading("25 ABC 123"), t.AddSeconds(0.4));
+        c.Observe(Reading("25 ABC 123"), t.AddSeconds(0.6));
+        Assert.Single(c.DrainReady(t.AddSeconds(0.6)));         // 4 görülme -> yayınla
     }
 
     [Fact]
-    public void Hold_still_emits_at_settle_even_if_samples_insufficient()
+    public void Hold_still_emits_at_settle_even_if_insufficient()
     {
-        // Recall koruması: yeterli örnek hiç birikmese bile settle'da yayınla (aracı kaçırma).
+        // Recall koruması: yeterli görülme hiç birikmese bile settle'da yayınla (aracı kaçırma).
         var c = New(holdSamples: 4);
         var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
-        c.Observe(Reading(40), t);
-        c.Observe(Reading(45), t.AddSeconds(0.2));              // yalnız 2 örnek
+        c.Observe(Reading("06 XY 34"), t);
+        c.Observe(Reading("06 XY 34"), t.AddSeconds(0.2));     // yalnız 2 görülme
         Assert.Empty(c.DrainReady(t.AddSeconds(0.5)));          // henüz tutuluyor
-        var ready = c.DrainReady(t.AddSeconds(4));              // settle doldu -> yine de yayınla
-        Assert.Single(ready);
-        Assert.Equal(-1f, ready[0].SizeTrend);                  // az örnek -> yön kararsız (geçer)
+        Assert.Single(c.DrainReady(t.AddSeconds(4)));           // settle -> yine de yayınla
     }
 }

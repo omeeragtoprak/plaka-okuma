@@ -77,17 +77,8 @@ public sealed class PlateConfirmerOptions
     public int CandidateCount { get; set; } = 5;
 
     /// <summary>
-    /// Yön (SizeTrend) hesabı için gereken asgari kutu-alanı örneği. Yarı-başına-max sağlamlığı için
-    /// EN AZ 4 olmalı (her yarıda ≥2 kare); altındaysa SizeTrend=-1 (karar verilemez, yaklaşıyor sayılır).
-    /// </summary>
-    public int ApproachMinSamples { get; set; } = 4;
-
-    /// <summary>Yön hesabı için izin kapsaması gereken asgari süre (ilk-son örnek arası). Altındaysa SizeTrend=-1.</summary>
-    public TimeSpan ApproachMinSpan { get; set; } = TimeSpan.FromSeconds(0.6);
-
-    /// <summary>
-    /// Yön için EMİT TUTMA: >0 ise onaylı ama henüz settle olmamış bir iz, kutu-alanı örneği bu sayıya
-    /// ulaşana kadar yayınlanmaz — böylece yön kararı yeterli kareyle (yarı-max) verilir. Settle'da her
+    /// Yön için EMİT TUTMA: >0 ise onaylı ama henüz settle olmamış bir iz, bu kadar kez GÖRÜLENE (Count)
+    /// kadar yayınlanmaz — böylece DirectionTracker yön kararını yeterli kareyle verebilir. Settle'da her
     /// hâlükârda yayınlanır (recall koruması: aracı asla kaçırma). 0 = kapalı (yön tutması yok).
     /// Yalnız YALNIZ-YAKLAŞAN filtresi açıkken (roi izleri) anlamlıdır; gözlem izlerinde 0 tutulmalı.
     /// </summary>
@@ -117,12 +108,7 @@ public sealed class PlateConfirmer
         // Fuzzy modda bu izde görülen TÜM okuma varyantları (compact). Eşleşme yalnız Best.Text'e
         // yapılırsa Best geçiş sırasında kayar (drift) ve aynı araç ikinci ize bölünür → çift emit.
         public HashSet<string>? Variants;
-        // Yön (yaklaşıyor/uzaklaşıyor) için kutu-ALANI zaman serisi (yalnız GERÇEK kare gözlemleri;
-        // enjekte edilen zenginleştirme okumaları eklenmez). Kronolojik; MergeTracks'te birleşir.
-        public List<(DateTimeOffset At, long Area)>? Areas;
     }
-
-    private const int MaxAreaSamples = 48; // iz başına örnek üst sınırı (bellek); en eskiler düşer
 
     private readonly Dictionary<string, Track> _tracks = new();
     private readonly PlateConfirmerOptions _o;
@@ -182,11 +168,6 @@ public sealed class PlateConfirmer
         t.Count++;
         t.Last = now;
         t.LastBox = reading.Box;
-        if (reading.Box.Width > 0 && reading.Box.Height > 0)
-        {
-            (t.Areas ??= new()).Add((now, (long)reading.Box.Width * reading.Box.Height));
-            if (t.Areas.Count > MaxAreaSamples) t.Areas.RemoveAt(0);
-        }
         if (reading.Confidence > t.Best.Confidence) t.Best = reading;
 
         if (_o.CharacterVoting && reading.SlotProbs is { Length: > 0 } sp && reading.OcrAlphabet is { Length: > 0 } alpha)
@@ -218,9 +199,9 @@ public sealed class PlateConfirmer
                 // yaklaştıkça gelecek daha iyi okumaları bekle (en geç settle'da yine yayınlanır).
                 if (!settled && _o.EarlyEmitMinOcr > 0 && result.OcrConfidence < _o.EarlyEmitMinOcr)
                     continue;
-                // Yön için emit tutma: yeterli kutu-alanı örneği birikene dek bekle (settle'da yayınla).
-                // Böylece yön yalnız 2 kareye değil, yarı-max için yeterli kareye dayanır.
-                if (!settled && _o.ApproachHoldSamples > 0 && (t.Areas?.Count ?? 0) < _o.ApproachHoldSamples)
+                // Yön için emit tutma: iz bu kadar kez görülene dek bekle (settle'da yayınla). Böylece
+                // DirectionTracker yönü yalnız 2 kareye değil, yeterli kareye dayanarak verebilir.
+                if (!settled && _o.ApproachHoldSamples > 0 && t.Count < _o.ApproachHoldSamples)
                     continue;
                 t.Emitted = true;
                 (ready ??= new List<PlateReading>()).Add(result);
@@ -280,10 +261,8 @@ public sealed class PlateConfirmer
 
     private PlateReading BuildResult(Track t)
     {
-        float trend = ComputeSizeTrend(t);
-
         if (!_o.CharacterVoting || t.SlotSum == null || t.Alphabet == null || t.Slots == 0)
-            return t.Best with { SizeTrend = trend };
+            return t.Best;
 
         // Biriken dağılımı ortalamaya çevir (0..1).
         var mean = new float[t.SlotSum.Length];
@@ -324,7 +303,7 @@ public sealed class PlateConfirmer
             if (tr.IsValid) { normalized = tr.Normalized; rawCompact = tr.Compact; }
         }
 
-        if (normalized == null) return t.Best with { SizeTrend = trend }; // uzlaşı geçersizse en iyi okuma
+        if (normalized == null) return t.Best; // uzlaşı geçersizse en iyi okuma
 
         return t.Best with
         {
@@ -334,29 +313,7 @@ public sealed class PlateConfirmer
             Confidence = t.Best.DetectorConfidence * conf,
             IsValidTr = true,
             Candidates = candidates,
-            SizeTrend = trend,
         };
-    }
-
-    // Yön eğilimi: izin GERÇEK-kare kutu-alanı serisinde SON-YARININ MAX alanı / ERKEN-YARININ MAX alanı.
-    // >1 yaklaşıyor (plaka büyüyor), <1 uzaklaşıyor. MAX kullanılır (ortalama/uç-nokta değil) çünkü tek
-    // bir kırpık/bulanık/kenar-taşmış kare kutuyu KÜÇÜLTÜR; küçük aykırı değer max'ı etkilemez, böylece
-    // yaklaşan bir aracın son karesi kırpılsa bile 'uzaklaşıyor' sanılıp BASTIRILMAZ (recall koruması).
-    // Uzaklaşan araçta ise son yarının EN BÜYÜK kutusu bile erken yarınınkinden küçüktür -> düşük oran.
-    // Yeterli kanıt yoksa (her yarı ≥2 kare gerektirir; az örnek / kısa süre) -1 = "karar verilemez",
-    // çağıran taraf YAKLAŞIYOR sayar. ApproachMinSamples≥4 olmalı (yarı başına ≥2 kare).
-    private float ComputeSizeTrend(Track t)
-    {
-        var a = t.Areas;
-        if (a == null || a.Count < Math.Max(4, _o.ApproachMinSamples)) return -1f;
-        if (a[^1].At - a[0].At < _o.ApproachMinSpan) return -1f;
-
-        int half = a.Count / 2;
-        long earlyMax = 0, recentMax = 0;
-        for (int i = 0; i < half; i++) if (a[i].Area > earlyMax) earlyMax = a[i].Area;
-        for (int i = half; i < a.Count; i++) if (a[i].Area > recentMax) recentMax = a[i].Area;
-        if (earlyMax <= 0) return -1f;
-        return (float)((double)recentMax / earlyMax);
     }
 
     // MergeAcrossProvince: kimlik = HARF|RAKAM (il hariç) -> il varyantları tek ize düşer, il oylanır.
@@ -456,12 +413,6 @@ public sealed class PlateConfirmer
         if (other.Variants != null)
         {
             (into.Variants ??= new HashSet<string>()).UnionWith(other.Variants);
-        }
-        if (other.Areas != null)
-        {
-            (into.Areas ??= new()).AddRange(other.Areas);
-            into.Areas.Sort((a, b) => a.At.CompareTo(b.At)); // kronolojik: erken/son üçte-bir doğru olsun
-            if (into.Areas.Count > MaxAreaSamples) into.Areas.RemoveRange(0, into.Areas.Count - MaxAreaSamples);
         }
     }
 
