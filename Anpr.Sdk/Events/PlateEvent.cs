@@ -52,4 +52,12 @@ public sealed record PlateEvent
 
     /// <summary>Top-K alternatif okuma adayı (whitelist toleransı; ilki Plate ile aynıdır). Yoksa null.</summary>
     public IReadOnlyList<PlateCandidate>? Candidates { get; init; }
+
+    /// <summary>
+    /// Yön göstergesi (denetim/ayar): izin plaka-kutusu alan eğilimi = son/erken ortalama alan.
+    /// &gt;1 araç yaklaşıyordu, &lt;1 uzaklaşıyordu, -1 karar verilemedi (kısa iz). RequireApproaching
+    /// açıkken belirgin uzaklaşan (bu değer &lt; ApproachDepartRatio) roi olayları zaten yayınlanmaz;
+    /// bu alan, yayınlananların yönünü tam-kare kanıtla karşılaştırıp eşiği ayarlamak için taşınır.
+    /// </summary>
+    public float SizeTrend { get; init; } = -1f;
 }

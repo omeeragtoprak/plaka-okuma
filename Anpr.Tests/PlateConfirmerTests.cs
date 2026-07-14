@@ -315,3 +315,135 @@ public class SpatialMergeTests
         Assert.Contains(ready, r => r.Text == "34 KLM 789");
     }
 }
+
+public class ApproachTrendTests
+{
+    // Kare boyutu (w=h) verilen okuma; alan = w². Aynı plaka -> tek ize düşer, alan serisi birikir.
+    private static PlateReading Reading(int side, float conf = 0.9f) => ReadingWH(side, side, conf);
+
+    private static PlateReading ReadingWH(int w, int h, float conf = 0.9f) => new()
+    {
+        Text = "25 ABC 123",
+        RawText = "25ABC123",
+        Confidence = conf,
+        DetectorConfidence = conf,
+        OcrConfidence = conf,
+        Box = new PlateBox(100, 100, w, h),
+        IsValidTr = true,
+    };
+
+    private static PlateConfirmer New(int minSamples = 4, double minSpanSec = 0.6, int holdSamples = 0) => new(new PlateConfirmerOptions
+    {
+        DedupWindow = TimeSpan.FromSeconds(8),
+        SettleWindow = TimeSpan.FromSeconds(3),
+        MinConfirmations = 2,
+        CharacterVoting = false, // SizeTrend'i izole ölç (dağılım oylaması bu teste karışmasın)
+        ApproachMinSamples = minSamples,
+        ApproachMinSpan = TimeSpan.FromSeconds(minSpanSec),
+        ApproachHoldSamples = holdSamples,
+    });
+
+    [Fact]
+    public void Growing_box_yields_trend_above_one_approaching()
+    {
+        var c = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[] sides = { 40, 45, 50, 55, 60 };               // alan 1600 -> 3600 (yaklaşıyor)
+        for (int i = 0; i < sides.Length; i++) c.Observe(Reading(sides[i]), t.AddSeconds(0.2 * i));
+        var ready = c.DrainReady(t.AddSeconds(0.8));
+        Assert.Single(ready);
+        Assert.True(ready[0].SizeTrend > 1.5f, $"yaklaşan iz için trend>1 beklenirdi, geldi {ready[0].SizeTrend}");
+    }
+
+    [Fact]
+    public void Shrinking_box_yields_trend_below_depart_ratio_departing()
+    {
+        var c = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[] sides = { 60, 55, 50, 45, 40 };               // alan 3600 -> 1600 (uzaklaşıyor)
+        for (int i = 0; i < sides.Length; i++) c.Observe(Reading(sides[i]), t.AddSeconds(0.2 * i));
+        var ready = c.DrainReady(t.AddSeconds(0.8));
+        Assert.Single(ready);
+        Assert.True(ready[0].SizeTrend is >= 0 and < 0.70f, $"uzaklaşan iz için trend<0.70 beklenirdi, geldi {ready[0].SizeTrend}");
+    }
+
+    [Fact]
+    public void Too_few_samples_yields_unknown_minus_one()
+    {
+        var c = New(minSamples: 4);
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading(40), t);
+        c.Observe(Reading(60), t.AddSeconds(0.3));           // yalnız 2 örnek (<4) -> karar verilemez
+        var ready = c.DrainReady(t.AddSeconds(4));           // settle ile yayınla
+        Assert.Single(ready);
+        Assert.Equal(-1f, ready[0].SizeTrend);
+    }
+
+    [Fact]
+    public void Short_span_yields_unknown_minus_one()
+    {
+        var c = New(minSpanSec: 0.6);
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[] sides = { 40, 45, 50, 55 };
+        for (int i = 0; i < sides.Length; i++) c.Observe(Reading(sides[i]), t.AddSeconds(0.1 * i)); // span 0.3s < 0.6
+        var ready = c.DrainReady(t.AddSeconds(4));
+        Assert.Single(ready);
+        Assert.Equal(-1f, ready[0].SizeTrend);
+    }
+
+    [Fact]
+    public void Flat_box_yields_trend_near_one()
+    {
+        var c = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        for (int i = 0; i < 5; i++) c.Observe(Reading(50), t.AddSeconds(0.2 * i)); // sabit boyut
+        var ready = c.DrainReady(t.AddSeconds(0.8));
+        Assert.Single(ready);
+        Assert.True(Math.Abs(ready[0].SizeTrend - 1f) < 0.05f, $"sabit iz için trend≈1 beklenirdi, geldi {ready[0].SizeTrend}");
+    }
+
+    [Fact]
+    public void Approaching_with_cropped_final_frame_not_flagged_departing()
+    {
+        // KRİTİK sağlamlık: yaklaşan araç (alan büyüyor) ama SON kare kadraj-kenarına taşıp kırpıldı
+        // (alan aniden küçük). Yarı-başına-MAX sayesinde tek kırpık kare max'ı etkilemez → trend≥1,
+        // araç BASTIRILMAZ. (Uç-nokta oranıyla eski kod bunu 'uzaklaşıyor' sanıp bariyer olayını kaçırırdı.)
+        var c = New();
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        int[,] wh = { {40,40}, {50,50}, {60,60}, {60,17} }; // alan 1600,2500,3600, kırpık son kare ~1020
+        for (int i = 0; i < 4; i++) c.Observe(ReadingWH(wh[i,0], wh[i,1]), t.AddSeconds(0.2 * i));
+        var ready = c.DrainReady(t.AddSeconds(0.6));
+        Assert.Single(ready);
+        Assert.True(ready[0].SizeTrend >= 1f, $"kırpık son kareye rağmen yaklaşan iz trend≥1 olmalı, geldi {ready[0].SizeTrend}");
+    }
+
+    [Fact]
+    public void Hold_defers_emit_until_enough_direction_samples()
+    {
+        // Emit tutma: onay 2'de dolsa da, yön için 4 alan örneği birikene dek yayınlanmaz.
+        var c = New(holdSamples: 4);
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading(40), t);
+        c.Observe(Reading(45), t.AddSeconds(0.2));
+        Assert.Empty(c.DrainReady(t.AddSeconds(0.2)));          // onaylı ama 2 örnek < 4 -> tutuldu
+        c.Observe(Reading(50), t.AddSeconds(0.4));
+        c.Observe(Reading(55), t.AddSeconds(0.6));
+        var ready = c.DrainReady(t.AddSeconds(0.6));            // 4 örnek -> yayınla
+        Assert.Single(ready);
+        Assert.True(ready[0].SizeTrend > 1f);                    // yaklaşıyor
+    }
+
+    [Fact]
+    public void Hold_still_emits_at_settle_even_if_samples_insufficient()
+    {
+        // Recall koruması: yeterli örnek hiç birikmese bile settle'da yayınla (aracı kaçırma).
+        var c = New(holdSamples: 4);
+        var t = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
+        c.Observe(Reading(40), t);
+        c.Observe(Reading(45), t.AddSeconds(0.2));              // yalnız 2 örnek
+        Assert.Empty(c.DrainReady(t.AddSeconds(0.5)));          // henüz tutuluyor
+        var ready = c.DrainReady(t.AddSeconds(4));              // settle doldu -> yine de yayınla
+        Assert.Single(ready);
+        Assert.Equal(-1f, ready[0].SizeTrend);                  // az örnek -> yön kararsız (geçer)
+    }
+}

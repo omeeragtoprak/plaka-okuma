@@ -17,6 +17,9 @@ if (giris is null && cikis is null)
 }
 
 var options = new AnprServiceOptions();   // üretimde doğrulanmış varsayılanlar
+// Ölçüm modu: ANPR_REQUIRE_APPROACHING=false ile filtre kapatılıp ham SizeTrend gözlemlenebilir.
+if (string.Equals(Environment.GetEnvironmentVariable("ANPR_REQUIRE_APPROACHING"), "false", StringComparison.OrdinalIgnoreCase))
+    options.RequireApproaching = false;
 if (giris != null) options.Cameras.Add(new CameraOptions { Id = "giris", Name = "Giriş", RtspUrl = giris });
 if (cikis != null) options.Cameras.Add(new CameraOptions { Id = "cikis", Name = "Çıkış", RtspUrl = cikis });
 
@@ -32,9 +35,10 @@ runtime.PlateDetected += e =>
     Interlocked.Increment(ref eventCount);
 
     // PMS iş kuralı örneği: yüksek güven -> bariyer/kayıt; düşük güven -> operatör onayı.
+    string yon = e.SizeTrend < 0 ? "trend=? (kararsız)" : $"trend={e.SizeTrend:F2}";
     Console.WriteLine(e.LowConfidence
-        ? $">>> OPERATÖR ONAYI: {e.Plate} (güven {e.OcrConfidence:P0}, kamera {e.CameraId}, olay {e.EventId})"
-        : $">>> PLAKA: {e.Plate} (güven {e.OcrConfidence:P0}, kamera {e.CameraId})");
+        ? $">>> OPERATÖR ONAYI: {e.Plate} (güven {e.OcrConfidence:P0}, {e.CameraId}, {yon})"
+        : $">>> PLAKA: {e.Plate} (güven {e.OcrConfidence:P0}, {e.CameraId}, {yon})");
 };
 
 await runtime.StartAsync();

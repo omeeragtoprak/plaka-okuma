@@ -53,6 +53,14 @@ public sealed record PlateReading
     /// </summary>
     public IReadOnlyList<PlateCandidate>? Candidates { get; init; }
 
+    /// <summary>
+    /// Yön göstergesi: izin ömrü boyunca plaka kutusu ALANININ eğilimi = son-üçte-bir ortalama /
+    /// erken-üçte-bir ortalama. &gt;1 aracın YAKLAŞTIĞINI (plaka büyüyor), &lt;1 UZAKLAŞTIĞINI gösterir.
+    /// -1 = yeterli kanıt yok (az örnek / kısa iz) → karar verilemez, "yaklaşıyor say". Yalnız uzlaşı
+    /// (BuildResult) çıktısında anlamlıdır.
+    /// </summary>
+    public float SizeTrend { get; init; } = -1f;
+
     public override string ToString() =>
         $"{Text} (conf={Confidence:F2}, det={DetectorConfidence:F2}, ocr={OcrConfidence:F2}, tr={IsValidTr})";
 }

@@ -104,7 +104,8 @@ public sealed class CameraWorker : IAsyncDisposable
         _sinks = sinks;
         _frequent = frequent;
         _logger = logger;
-        PlateConfirmerOptions MakeOpts() => new()
+        // hold: yalnız roi izlerinde yön için emit tutma açılır; gözlem izleri normal (tutmasız) akar.
+        PlateConfirmerOptions MakeOpts(bool hold) => new()
         {
             DedupWindow = TimeSpan.FromSeconds(Math.Max(1, options.DedupWindowSeconds)),
             SettleWindow = TimeSpan.FromSeconds(Math.Max(0, options.SettleWindowSeconds)),
@@ -117,9 +118,13 @@ public sealed class CameraWorker : IAsyncDisposable
             SpatialMergeIou = options.SpatialMergeIou,
             SkipCharLevel = options.SkipCharLevel,
             CandidateCount = options.CandidateCount,
+            ApproachMinSamples = options.ApproachMinSamples,
+            ApproachMinSpan = TimeSpan.FromSeconds(Math.Max(0, options.ApproachMinSpanSeconds)),
+            // Yalnız-yaklaşan filtresi açıksa, roi izini yön için yeterli kare birikene dek tut.
+            ApproachHoldSamples = hold && options.RequireApproaching ? Math.Max(4, options.ApproachMinSamples) : 0,
         };
-        _confirmer = new PlateConfirmer(MakeOpts());
-        _obsConfirmer = new PlateConfirmer(MakeOpts());
+        _confirmer = new PlateConfirmer(MakeOpts(hold: true));
+        _obsConfirmer = new PlateConfirmer(MakeOpts(hold: false));
     }
 
     public void Start(CancellationToken cancellationToken)
@@ -456,6 +461,16 @@ public sealed class CameraWorker : IAsyncDisposable
 
     private void Emit(PlateReading best, DateTimeOffset now, string scope)
     {
+        // Yalnız YAKLAŞAN araç: iz belirgin küçülüyorsa (uzaklaşıyor) roi olayını hiç üretme.
+        // SizeTrend=-1 (kararsız/kısa iz) veya ≥eşik → geçer (recall-öncelikli). Gözlem kapsamı gatelenmez.
+        if (scope == "roi" && _options.RequireApproaching
+            && best.SizeTrend >= 0 && best.SizeTrend < _options.ApproachDepartRatio)
+        {
+            _logger.LogInformation("[{Cam}] uzaklaşan araç bastırıldı: '{Plate}' (alan-eğilimi {Trend:F2} < {Th:F2})",
+                _camera.Id, best.Text, best.SizeTrend, _options.ApproachDepartRatio);
+            return;
+        }
+
         // Kanıt kırpıntısı + tam kare: füzyon bucket'ı bozmadan ÖNCE en iyi kırpıntı ve karesini JPEG'e al.
         (string? evidence, string? framePath) = _options.EvidenceCrops ? SaveEvidence(best, now) : (null, null);
 
@@ -525,6 +540,7 @@ public sealed class CameraWorker : IAsyncDisposable
             FramePath = framePath,
             LowConfidence = best.OcrConfidence < _options.ManualReviewMinOcr,
             Candidates = best.Candidates,
+            SizeTrend = best.SizeTrend,
         };
 
         EventsEmitted++;

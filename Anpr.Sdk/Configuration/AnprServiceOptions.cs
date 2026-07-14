@@ -152,6 +152,25 @@ public sealed class AnprServiceOptions
     public int CandidateCount { get; set; } = 5;
 
     /// <summary>
+    /// Yalnız YAKLAŞAN aracı yayınla: izin plaka-kutusu alanı ömrü boyunca BELİRGİN küçülüyorsa
+    /// (araç uzaklaşıyor) roi olayı bastırılır. Kutu alanı = mesafe göstergesi (yaklaşınca büyür).
+    /// Recall-öncelikli: yalnız güçlü küçülme sinyalinde bastırır; kararsız/kısa izler daima geçer.
+    /// </summary>
+    public bool RequireApproaching { get; set; } = true;
+
+    /// <summary>Uzaklaşıyor eşiği: son/erken kutu-alanı oranı bu değerin ALTINDAYSA "uzaklaşıyor" sayılır
+    /// (0.70 = plaka %30+ küçülmüş). Düşürmek daha katı bastırma, yükseltmek daha az. SizeTrend=-1 (kararsız) geçer.</summary>
+    public float ApproachDepartRatio { get; set; } = 0.70f;
+
+    /// <summary>Yön kararı için gereken asgari kutu-alanı örneği (yarı-başına-max sağlamlığı için ≥4).
+    /// 2 fps'te araç ~2 karede emit olduğundan, filtre açıkken emit bu kadar kare birikene dek TUTULUR
+    /// (settle'da her hâlükârda yayınlanır) — böylece yön tek/iki kareye değil yeterli kareye dayanır.</summary>
+    public int ApproachMinSamples { get; set; } = 4;
+
+    /// <summary>Yön kararı için izin kapsaması gereken asgari süre (sn). Altındaysa karar verilmez (geçer).</summary>
+    public double ApproachMinSpanSeconds { get; set; } = 0.6;
+
+    /// <summary>
     /// Emit-sonrası varyant bastırma penceresi (sn): yeni emitin plakası, aynı kameranın/kapsamın son
     /// emitlerinden birinin ADAY listesinde geçiyorsa (veya birebir aynıysa) yeni OLAY yayınlanmaz —
     /// aynı geçişin farklı-uzunluk hayalet varyantları tek olaya iner. 0 = kapalı.

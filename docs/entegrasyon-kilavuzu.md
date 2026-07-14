@@ -87,13 +87,21 @@ Otopark PC'si
   "OcrConfidence": 0.99,
   "Box": { "X": 1693, "Y": 690, "Width": 120, "Height": 72 },
   "Scope": "roi",                          // webhook'a YALNIZ "roi" gelir
-  "EvidencePath": "evidence/xxx.jpg",      // kanıt: GET http://<anpr>:8090/evidence/... 
+  "EvidencePath": "evidence/xxx.jpg",      // plaka kırpıntısı: GET http://<anpr>:8090/evidence/...
+  "FramePath": "evidence/xxx_full.jpg",    // aracın da göründüğü TAM KARE (son okunan aracı görselleme)
   "LowConfidence": false,                  // true → operatör onayına düşür
+  "SizeTrend": 1.34,                        // yön (denetim): >1 yaklaşıyordu, <1 uzaklaşıyordu, -1 kararsız
   "Candidates": [                           // top-5 aday; whitelist toleransı için
     { "Plate": "25ABC123", "Confidence": 0.97 }
   ]
 }
 ```
+
+> **Yön filtresi (v1.0.1)**: `RequireApproaching=true` (varsayılan) iken UZAKLAŞAN araç (plaka kutusu
+> belirgin küçülen iz) için roi olayı hiç üretilmez — yalnız kameraya YAKLAŞAN araçlar yayınlanır.
+> Kutu-alanı yarı-başına-max ile ölçülür (tek kırpık kare yanıltmaz); karar için yeterli kare birikene
+> dek emit kısa süre tutulur, en geç settle'da yayınlanır (yaklaşan araç asla kaçırılmaz). Kapatmak:
+> `RequireApproaching=false`. `SizeTrend` her olayda taşınır; tam-kare kanıtıyla eşiği ayarlamak için.
 
 PMS iş kuralları:
 - **İdempotency**: `EventId` daha önce işlendiyse yoksay (retry teslimi mükerrer POST üretebilir).
