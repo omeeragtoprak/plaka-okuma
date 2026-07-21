@@ -28,10 +28,15 @@ beyazda 0/400 yanlış-snap.** lev≤2 siyah +45pp (→%97) / %0.5 risk. → `do
 ```
 (Rapor + gece 4 plaka biliyor; TAM liste sende.) Girince #1 zaaf büyük ölçüde kapanır.
 
-## 3) Yön filtresi (yaklaşan/uzaklaşan) — varsayılan KAPALI yapıldı (dürüstlük)
-4 canlı koşuda (07-14) bu geometride KANITLI ETKİSİZ: plaka ancak araç kapıda DURUNCA net tespit
-edildiğinden boyut donuyor, trend hep ~1.0. `RequireApproaching` default false. Doğru sinyal muhtemelen
-**hareket-yolu (konum yönü)** — kameralar dönünce denenecek (senin son sorunun cevabını bekliyorum).
+## 3) Yön filtresi — KESİN SONUÇ: per-kamera yörünge imkânsız (canlı kanıtlandı)
+Kameralar sabaha karşı toparladı (RTSP arızası geçti). Hareket-yolu (konum) sinyalini de canlı ölçtüm:
+6 araç, 5/6 move=(0,0) — boyut gibi DÜZ. **Kök neden**: plaka yalnız yakın-durgun zonda tespit
+ediliyor; ayırt edici sinyal (büyüme/hareket) uzakta, orada plaka tespit edilemiyor. Boyut VE konum
+yörünge sinyalleri elendi. `RequireApproaching` varsayılan KAPALI. → `docs/2026-07-21-yon-tespiti-kesin-sonuc.md`
+
+**Geriye kalan gerçek seçenekler (karar senin):** (A) ön/arka araç-yüzü sınıflandırıcı (model, per-kamera,
+gözlemine uygun), (B) çapraz-kamera dedup (modelsiz, koordineli), (C) yön filtresini bırak + enerjiyi
+siyah-plaka fix'ine ver.
 
 ## Durum
 - Tüm değişiklikler test-geçmiş (85/85), config-gated, **varsayılan davranış değişmedi** (güvenli).
