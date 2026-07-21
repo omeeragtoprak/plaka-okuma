@@ -54,7 +54,9 @@ events.jsonl (14 gün, ≥0.98 & ≥5 kez müdavim kuralı) analizi: **en kötü
 | 25ACV240 | 8 | evet (bu daha sık doğru okunuyor) |
 
 Ayrıca auto-müdavim havuzu büyük (235 plaka) → yanlış-snap riski manuel whitelist'ten (birkaç plaka)
-yüksek. Bu yüzden `SnapToFrequent` varsayılan KAPALI; **çözüm için kullanıcı `KnownPlates`'i doldurmalı.**
+yüksek. **Ölçüldü** (500 genel kırpıntı, emit=pseudo-gerçek, lev≤1 auto-müdavim snap): 8 düzeltme,
+15 bozma = **net −7** (zararlı). Bu yüzden `SnapToFrequent` varsayılan KAPALI ve öyle kalmalı;
+**çözüm için kullanıcı `KnownPlates`'i (küçük, küratörlü liste) doldurmalı.**
 
 ## Kalan
 - **Canlı doğrulama** (kameralar RTSP arızasından dönünce): snap loglarını izle, yanlış-snap var mı bak.
