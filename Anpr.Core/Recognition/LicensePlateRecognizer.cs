@@ -41,12 +41,13 @@ public sealed class LicensePlateRecognizer : IDisposable
                            ?? _session.OutputMetadata.Keys.First();
 
         // Model/config boyut uyuşmazlığı erken ve AÇIK hata versin (aksi halde Decode'da her karede
-        // ham IndexOutOfRange; ör. 9-slotlu v1 modeli + 10-slotlu v2 config). Batch dinamikse atla.
+        // ham IndexOutOfRange; ör. 9-slotlu v1 modeli + 10-slotlu v2 config). Batch dim'i genelde
+        // DİNAMİK (-1) olduğundan onu sayma; POZİTİF boyutların (slot×vocab) çarpımını doğrula.
         int expected = _config.MaxPlateSlots * _config.Alphabet.Length;
-        var dims = _session.OutputMetadata[_plateOutputName].Dimensions;
-        long known = 1; bool dynamic = false;
-        foreach (var d in dims) { if (d < 0) dynamic = true; else known *= d; }
-        if (!dynamic && known != expected)
+        long known = 1;
+        foreach (var d in _session.OutputMetadata[_plateOutputName].Dimensions) if (d > 0) known *= d;
+        // known>1: tamamen dinamik çıktıda (hepsi -1) doğrulanamaz; savunmacı decode devreye girer.
+        if (known > 1 && known != expected)
             throw new InvalidOperationException(
                 $"OCR model/config UYUŞMAZLIĞI: model '{Path.GetFileName(full)}' çıktısı {known} değer üretiyor, " +
                 $"config '{Path.GetFileName(configPath)}' {_config.MaxPlateSlots}×{_config.Alphabet.Length}={expected} bekliyor. " +
