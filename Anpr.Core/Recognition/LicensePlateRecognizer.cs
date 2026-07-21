@@ -39,6 +39,18 @@ public sealed class LicensePlateRecognizer : IDisposable
         _plateOutputName = _session.OutputMetadata.Keys.FirstOrDefault(k =>
                                k.Equals("plate", StringComparison.OrdinalIgnoreCase))
                            ?? _session.OutputMetadata.Keys.First();
+
+        // Model/config boyut uyuşmazlığı erken ve AÇIK hata versin (aksi halde Decode'da her karede
+        // ham IndexOutOfRange; ör. 9-slotlu v1 modeli + 10-slotlu v2 config). Batch dinamikse atla.
+        int expected = _config.MaxPlateSlots * _config.Alphabet.Length;
+        var dims = _session.OutputMetadata[_plateOutputName].Dimensions;
+        long known = 1; bool dynamic = false;
+        foreach (var d in dims) { if (d < 0) dynamic = true; else known *= d; }
+        if (!dynamic && known != expected)
+            throw new InvalidOperationException(
+                $"OCR model/config UYUŞMAZLIĞI: model '{Path.GetFileName(full)}' çıktısı {known} değer üretiyor, " +
+                $"config '{Path.GetFileName(configPath)}' {_config.MaxPlateSlots}×{_config.Alphabet.Length}={expected} bekliyor. " +
+                "OcrModelPath ile OcrConfigPath AYNI sürüm olmalı.");
     }
 
     public PlateOcrConfig Config => _config;
@@ -124,8 +136,13 @@ public sealed class LicensePlateRecognizer : IDisposable
         int countNonPad = 0;
         char padChar = _config.PadChar[0];
 
+        // Savunmacı sınır: dinamik-boyut modelinde kurucu doğrulaması atlanmış olabilir; taşmada
+        // çökmek yerine kalan slotları pad ile doldur (kurucu zaten sabit-boyutta net hata verir).
+        int usableSlots = Math.Min(slots, probs.Length / Math.Max(1, vocab));
+
         for (int t = 0; t < slots; t++)
         {
+            if (t >= usableSlots) { chars[t] = padChar; continue; }
             int start = t * vocab;
 
             float max = float.NegativeInfinity;
