@@ -93,7 +93,7 @@ kritik 5 boşluk **bariyer davranışını ve saha teşhisini** etkiliyor, motor
 | M11 | ✅ | KnownPlates snap güven-kapısı varsayılan 1.0 (kapalı) — yüksek-güvenli gerçek komşu plaka protokole yeniden yazılabilir; SnapMaxLev↔SnapMaxOcrConfidence bağlı değil | `AnprServiceOptions.cs:197,185` | SnapMaxLev>1 iken güven-kapısını otomatik düşür; belgelenmeli |
 | M12 | ⚠️ | Kimlik anahtarı rakam bloğunu YOK SAYIYOR — aynı il+harf farklı araçlar tek ize düşer | `PlateConfirmer.cs:325` | Track-key'e rakam bloğunu dahil et (H1 ile ilişkili) |
 | M13 | ⚠️ | Kanonik OCR modeli 3 yüzeyde çelişiyor; pilot yanlış modeli sevk ediyor olabilir | `AnprServiceOptions.cs:44` | Tek kaynak; pilot config'in erz modelini kullandığını doğrula |
-| M14 | ⚠️ | /health üst-durumu bir kamera bağlıysa 'ok' — kör bariyer kamerasını maskeler | `Program.cs:146` | Üst-durum = TÜM kameralar sağlıklı; kamera-başına durum |
+| M14 | ✅ KAPANDI | /health üst-durumu bir kamera bağlıysa 'ok' — kör bariyer kamerasını maskeler | `Program.cs:146` | ✅ `HealthStatus.Compute`: all→ok/some→degraded/none→down; testli (111 test) |
 | M15 | ⚠️ | DLL modunda kamera bağlantı-durumu değişimi için olay/callback yok | `AnprRuntime.cs:47` | `CameraStatusChanged` olayı — PMS sessizce körleşmesin |
 | M16 | ⚠️ | PlateFuser hizalama referansı=crops[0], boyut referansı=en büyük (uyumsuz) | `PlateFuser.cs:28` | Hizalama+boyut referansını en büyük kırpıntıya birle |
 | M17 | ⚠️ | PlateRectifier2.Invert3x3 tekilliğe korumasız (kötü-koşullu homografide çöp) | `PlateRectifier2.cs:216` | det≈0 kontrolü → rektifikasyonu atla, ham kırpıntı |

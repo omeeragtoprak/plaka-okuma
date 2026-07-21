@@ -153,8 +153,9 @@ app.MapGet("/health", (AnprCameraSupervisor sup) =>
         // Plaka verisi yalnız token-korumalı /events + /panel üzerinden.
     }).ToArray();
 
-    string status = cameras.Length == 0 ? "no-cameras"
-        : cameras.Any(c => c.connected) ? "ok" : "degraded";
+    // M14: "bir kamera bağlıysa ok" KÖR bir bariyer kamerasını maskeliyordu (giriş düşükken sistem
+    // sağlıklı görünürdü). Üst-durum artık TÜM kameraların bağlı olmasını ister (izleme gerçeği görsün).
+    string status = HealthStatus.Compute(cameras.Length, cameras.Count(c => c.connected));
 
     return Results.Json(new
     {
