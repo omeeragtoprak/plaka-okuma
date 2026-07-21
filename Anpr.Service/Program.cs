@@ -148,7 +148,9 @@ app.MapGet("/health", (AnprCameraSupervisor sup) =>
         restartCount = w.RestartCount,
         eventsEmitted = w.EventsEmitted,
         lastEventUtc = w.LastEventUtc,
-        lastPlate = w.LastPlate,
+        // lastPlate KASITLI dışarıda: /health token-muaf (izleme için açık); gerçek plaka metni KVKK
+        // PII'sidir, kimlik-doğrulamasız sızmamalı. Zaman damgası (lastEventUtc) izleme için yeterli.
+        // Plaka verisi yalnız token-korumalı /events + /panel üzerinden.
     }).ToArray();
 
     string status = cameras.Length == 0 ? "no-cameras"
