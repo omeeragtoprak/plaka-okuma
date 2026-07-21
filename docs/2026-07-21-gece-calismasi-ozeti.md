@@ -49,7 +49,14 @@ DLL teslim öncesi kalite denetimi. Doğrulanmış + düzeltilenler:
 - **Supervisor sessiz-hata**: tüm kameralar başarısızsa fırlatır (sözleşme).
 - **KnownPlates null crash (yeni kod)**: null öğe SDK init'i çökertiyordu → filtrelenir.
 - Snap güven-kapısı + aday-listesi tutarlılığı (yeni kod sağlamlaştırma).
-- 87/87 test.
+- **Core denetimi**: görüntü/dedektör/TR-mantık boyutları TEMİZ (çekirdek sağlam). Tek bulgu:
+  OCR model/config boyut-uyuşmazlığı koruması (yanlış eşleşen model+config → net hata, çökme yerine).
+- 87/87 test. **Canlı Release servisi DEĞİŞTİRİLMEDİ** (deneysel/yeni kod prod'a dağıtılmadı).
+
+**ÖNERİ — dağıtım**: ffmpeg-öksüzlük düzeltmesi 07-13/07-16 tipi servis-takılma outage'larını (seni
+sabaha karşı uyandıran türden) önler. Çalışan servis hâlâ eski (buggy) ikili. Değişiklikleri incele,
+uygun görürsen Release'i yeniden derleyip servisi yeniden başlat (varsayılanlar güvenli: snap kapalı,
+yön kapalı). Not: 07-21'in KAMERA-tarafı outage'ını bu düzeltme önlemez (o fiziksel).
 
 ## Durum
 - Tüm değişiklikler test-geçmiş (85/85), config-gated, **varsayılan davranış değişmedi** (güvenli).
