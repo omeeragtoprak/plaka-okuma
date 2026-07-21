@@ -30,6 +30,7 @@ public static class PlateFuser
         var accR = new float[W * H];
         var accG = new float[W * H];
         var accB = new float[W * H];
+        var cnt = new int[W * H];   // her pikselin gerçek katkı sayısı (kaydırmada menzil-dışı kalanlar hariç)
 
         foreach (var img in resized)
         {
@@ -44,22 +45,23 @@ public static class PlateFuser
                     int sx = x + dx; if (sx < 0 || sx >= W) continue;
                     int s = sy * rb + sx * 4;
                     int a = y * W + x;
-                    accR[a] += px[s]; accG[a] += px[s + 1]; accB[a] += px[s + 2];
+                    accR[a] += px[s]; accG[a] += px[s + 1]; accB[a] += px[s + 2]; cnt[a]++;
                 }
             }
         }
 
-        int n = resized.Count;
         var info = new SKImageInfo(W, H, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         var outBmp = new SKBitmap(info);
         var outSpan = outBmp.GetPixels();
-        // yaz
+        // yaz: TAM kare sayısına değil, o pikselin GERÇEK katkı sayısına böl (kaydırmada bazı kareler
+        // menzil-dışı kalınca kenar pikselleri yapay karartmayı önler; kare 0 daima katkıda → cnt≥1).
         var buf = new byte[W * H * 4];
         for (int a = 0; a < W * H; a++)
         {
-            buf[a * 4] = (byte)(accR[a] / n);
-            buf[a * 4 + 1] = (byte)(accG[a] / n);
-            buf[a * 4 + 2] = (byte)(accB[a] / n);
+            int c = cnt[a] > 0 ? cnt[a] : 1;
+            buf[a * 4] = (byte)(accR[a] / c);
+            buf[a * 4 + 1] = (byte)(accG[a] / c);
+            buf[a * 4 + 2] = (byte)(accB[a] / c);
             buf[a * 4 + 3] = 255;
         }
         System.Runtime.InteropServices.Marshal.Copy(buf, 0, outSpan, buf.Length);
@@ -97,7 +99,10 @@ public static class PlateFuser
                         int m = movL[(y + dy) * W + (x + dx)];
                         sad += Math.Abs(r - m);
                     }
-                if (sad < best) { best = sad; bdx = dx; bdy = dy; }
+                // Beraberlikte (düz/düşük-doku kırpıntı) en KÜÇÜK büyüklüklü kaydırmayı seç: gereksiz
+                // kaymayı (dolayısıyla kenar-atlamayı) önler; hizalama gerçek kayma varsa yine yakalar.
+                if (sad < best || (sad == best && Math.Abs(dx) + Math.Abs(dy) < Math.Abs(bdx) + Math.Abs(bdy)))
+                    { best = sad; bdx = dx; bdy = dy; }
             }
         return (bdx, bdy);
     }
