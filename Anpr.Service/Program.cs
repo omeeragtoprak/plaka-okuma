@@ -21,11 +21,11 @@ builder.WebHost.ConfigureKestrel(k =>
     IPAddress ip;
     switch (opts.HttpBindAddress)
     {
-        case "0.0.0.0" or "":
-            ip = IPAddress.Any;
+        case "0.0.0.0":
+            ip = IPAddress.Any;   // TÜM arayüzler (LAN'a açık) — yalnız açıkça istenirse
             break;
-        case "localhost":
-            ip = IPAddress.Loopback;
+        case "localhost" or "":
+            ip = IPAddress.Loopback;   // güvenli varsayılan: yalnız bu makine
             break;
         default:
             if (IPAddress.TryParse(opts.HttpBindAddress, out var parsed))
@@ -44,6 +44,14 @@ builder.WebHost.ConfigureKestrel(k =>
             break;
     }
     k.Listen(ip, opts.HttpPort);
+
+    // H4: LAN'a açık bind + boş PanelToken = canlı görüntü/plaka/ROI kimlik-doğrulamasız tüm ağa açık.
+    // Varsayılan artık loopback; operatör bilerek 0.0.0.0 yaptıysa ve token yoksa GÜRÜLTÜLÜ uyar (KVKK).
+    if (SecurityChecks.IsInsecureExposure(ip, opts.PanelToken))
+        Console.Error.WriteLine(
+            $"[GÜVENLİK UYARISI] Panel {ip}:{opts.HttpPort} adresinde TÜM AĞA açık ve PanelToken BOŞ — " +
+            "canlı kamera görüntüsü, plaka geçmişi ve ROI kimlik doğrulaması olmadan erişilebilir. " +
+            "PanelToken ayarlayın YA DA HttpBindAddress'i 'localhost' yapın (KVKK/güvenlik).");
 });
 
 // --- Müdavim plaka kaydı (varyant bastırma kural-D) ---

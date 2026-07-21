@@ -268,8 +268,10 @@ public sealed class AnprServiceOptions
 
     public int HttpPort { get; set; } = 8080;
 
-    /// <summary>HTTP dinleme adresi. 0.0.0.0 = tüm arayüzler (LAN'daki web app erişebilsin).</summary>
-    public string HttpBindAddress { get; set; } = "0.0.0.0";
+    /// <summary>HTTP dinleme adresi. Varsayılan "localhost" (yalnız bu makine — güvenli varsayılan, KVKK).
+    /// LAN'dan erişim için açıkça "0.0.0.0" yapın VE PanelToken ayarlayın (aksi halde canlı görüntü/plaka/ROI
+    /// tüm ağa kimlik-doğrulamasız açık olur — açılışta uyarılır). Boş "" = loopback.</summary>
+    public string HttpBindAddress { get; set; } = "localhost";
 
     /// <summary>/events/recent için bellekte tutulacak maksimum olay sayısı.</summary>
     public int RecentEventsCapacity { get; set; } = 200;
