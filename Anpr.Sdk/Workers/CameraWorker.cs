@@ -493,6 +493,24 @@ public sealed class CameraWorker : IAsyncDisposable
         string compact = Compact(best.Text);
         if (compact.Length == 0) return;
 
+        // Whitelist/müdavim SNAP: okuma bilinen bir plakaya lev≤SnapMaxLev yakınsa düzelt (siyah resmi
+        // plaka gibi frekanslı araçların sistematik yanlış-okumasını düzeltir; ölçüm: lev≤1 siyah +27pp).
+        if (scope == "roi" && _options.SnapMaxLev > 0)
+        {
+            string snapped = _frequent.SnapTarget(compact, _options.SnapMaxLev, _options.SnapToFrequent);
+            if (snapped != compact)
+            {
+                var tr = Anpr.Core.TurkishPlates.TurkishPlateNormalizer.Normalize(snapped);
+                if (tr.IsValid)
+                {
+                    _logger.LogInformation("[{Cam}] plaka snap: '{Old}' -> '{New}' (bilinen/müdavim, lev≤{Lev})",
+                        _camera.Id, best.Text, tr.Normalized, _options.SnapMaxLev);
+                    best = best with { Text = tr.Normalized!, RawText = tr.Compact! };
+                    compact = tr.Compact!;
+                }
+            }
+        }
+
         // Emit-seviyesi güven tabanı: birleşik/uzlaşı okumanın güveni de tabanı geçmeli
         // (taban kare-başında uygulanıyor ama uzlaşının güveni altına düşebilir -> sızıntıyı keser).
         if (best.OcrConfidence < _options.EmitMinOcrConfidence) return;

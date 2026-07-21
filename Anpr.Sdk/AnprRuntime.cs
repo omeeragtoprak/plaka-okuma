@@ -59,7 +59,11 @@ public sealed class AnprRuntime : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         var lf = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = lf.CreateLogger<AnprRuntime>();
-        FrequentPlates = new FrequentPlateRegistry();
+        FrequentPlates = new FrequentPlateRegistry
+        {
+            KnownPlates = new HashSet<string>((options.KnownPlates ?? new()).Select(p =>
+                new string(p.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant())),
+        };
 
         var sinks = new List<IEventSink> { new DelegateEventSink(e => RaisePlateDetected(e)) };
         if (extraSinks != null) sinks.AddRange(extraSinks);

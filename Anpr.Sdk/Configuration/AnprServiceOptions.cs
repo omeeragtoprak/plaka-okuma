@@ -173,6 +173,22 @@ public sealed class AnprServiceOptions
     public double ApproachMinSpanSeconds { get; set; } = 0.6;
 
     /// <summary>
+    /// Bilinen plaka whitelist'i (ör. resmi/protokol araçları). Emit anında, okuma bu listeden bir
+    /// plakaya edit-mesafesi ≤ SnapMaxLev yakınsa ona DÜZELTİLİR ("snap"). Siyah resmi plaka gibi
+    /// FREKANSLI araçların sistematik yanlış-okumasını düzeltir (offline ölçüm: lev≤1 siyah +27pp,
+    /// beyazda 0 yanlış-snap). Boş = etkisiz. Güvenli: küçük, küratörlü liste + lev≤1.
+    /// </summary>
+    public List<string> KnownPlates { get; set; } = new();
+
+    /// <summary>Snap için azami edit-mesafesi (boşluksuz plaka). 1 = güvenli (0 yanlış-snap ölçüldü);
+    /// 2 = daha çok düzeltir (siyah +45pp) ama küçük yanlış-snap riski (~%0.5). 0 = snap kapalı.</summary>
+    public int SnapMaxLev { get; set; } = 1;
+
+    /// <summary>Manuel whitelist'e EK olarak, otomatik öğrenilen MÜDAVİM plakalara da snap et. Müdavim
+    /// kaydı yanlış-okumalarla kirlenebileceğinden varsayılan KAPALI (canlı doğrulama sonrası açılır).</summary>
+    public bool SnapToFrequent { get; set; } = false;
+
+    /// <summary>
     /// Emit-sonrası varyant bastırma penceresi (sn): yeni emitin plakası, aynı kameranın/kapsamın son
     /// emitlerinden birinin ADAY listesinde geçiyorsa (veya birebir aynıysa) yeni OLAY yayınlanmaz —
     /// aynı geçişin farklı-uzunluk hayalet varyantları tek olaya iner. 0 = kapalı.

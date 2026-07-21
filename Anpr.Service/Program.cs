@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Options;
 using Anpr.Service;
 using Anpr.Sdk.Configuration;
 using Anpr.Service.Panel;
@@ -48,10 +49,15 @@ builder.WebHost.ConfigureKestrel(k =>
 // --- Müdavim plaka kaydı (varyant bastırma kural-D) ---
 builder.Services.AddSingleton(sp =>
 {
-    var reg = new FrequentPlateRegistry();
+    var o = sp.GetRequiredService<IOptions<AnprServiceOptions>>().Value;
+    var reg = new FrequentPlateRegistry
+    {
+        KnownPlates = new HashSet<string>((o.KnownPlates ?? new()).Select(p =>
+            new string(p.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant())),
+    };
     int n = reg.LoadFromJsonl(Path.Combine(AppContext.BaseDirectory, "events.jsonl"));
     sp.GetRequiredService<ILogger<FrequentPlateRegistry>>()
-      .LogInformation("müdavim kaydı: {N} olaydan {M} plaka yüklendi", n, reg.Count);
+      .LogInformation("müdavim kaydı: {N} olaydan {M} plaka yüklendi | whitelist {W}", n, reg.Count, reg.KnownPlates.Count);
     return reg;
 });
 

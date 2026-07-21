@@ -20,8 +20,60 @@ public sealed class FrequentPlateRegistry
 
     public int Count => _counts.Count;
 
+    /// <summary>Manuel whitelist: sitenin BİLİNEN plakaları (ör. resmi/protokol araçları). Bunlara
+    /// snap her zaman güvenlidir (küçük, küratörlü küme). Config'den doldurulur.</summary>
+    public IReadOnlyCollection<string> KnownPlates { get; init; } = System.Array.Empty<string>();
+
     public bool IsFrequent(string compact)
         => _counts.TryGetValue(compact, out int n) && n >= MinSightings;
+
+    /// <summary>
+    /// Yanlış-okuma düzeltme: <paramref name="compact"/> okuması, BİLİNEN bir plakaya (manuel whitelist
+    /// ve isteğe bağlı müdavimler) edit-mesafesi ≤ <paramref name="maxLev"/> yakınsa o bilinen plakaya
+    /// "snap"lenir; değilse aynen döner. Okumanın kendisi zaten biliniyorsa dokunulmaz. Aynı mesafede
+    /// birden çok aday varsa: whitelist > en yüksek görülme sayılı müdavim. Siyah resmi plaka gibi
+    /// FREKANSLI araçların sistematik yanlış-okumalarını düzeltir (offline ölçüm: lev≤1 siyah +27pp,
+    /// beyazda 0 yanlış-snap). maxLev≤0 = kapalı.
+    /// </summary>
+    public string SnapTarget(string compact, int maxLev, bool includeFrequent)
+    {
+        if (maxLev <= 0 || compact.Length < 5) return compact;
+        if (KnownPlates.Contains(compact) || IsFrequent(compact)) return compact;
+
+        string best = compact; int bestLev = maxLev + 1; long bestScore = -1;
+        void Consider(string cand, long score)
+        {
+            if (cand == compact) return;
+            int d = BoundedLev(compact, cand, maxLev);
+            if (d > maxLev) return;
+            if (d < bestLev || (d == bestLev && score > bestScore)) { bestLev = d; best = cand; bestScore = score; }
+        }
+        foreach (var w in KnownPlates) Consider(w, long.MaxValue);          // whitelist önceliği
+        if (includeFrequent)
+            foreach (var kv in _counts)
+                if (kv.Value >= MinSightings) Consider(kv.Key, kv.Value);
+        return best;
+    }
+
+    // Erken-çıkışlı Levenshtein: mesafe maxLev'i aşarsa maxLev+1 döner (hız).
+    private static int BoundedLev(string a, string b, int max)
+    {
+        if (System.Math.Abs(a.Length - b.Length) > max) return max + 1;
+        var dp = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) dp[j] = j;
+        for (int i = 1; i <= a.Length; i++)
+        {
+            int prev = dp[0]; dp[0] = i; int rowMin = dp[0];
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cur = dp[j];
+                dp[j] = System.Math.Min(System.Math.Min(dp[j] + 1, dp[j - 1] + 1), prev + (a[i - 1] == b[j - 1] ? 0 : 1));
+                prev = cur; if (dp[j] < rowMin) rowMin = dp[j];
+            }
+            if (rowMin > max) return max + 1;
+        }
+        return dp[b.Length];
+    }
 
     public void Record(string compact, float ocrConfidence)
     {
