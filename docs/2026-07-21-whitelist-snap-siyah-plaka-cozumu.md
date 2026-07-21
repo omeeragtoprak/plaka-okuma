@@ -24,6 +24,10 @@ okuma bilinen bir plakaya edit-mesafesi ≤ `SnapMaxLev` yakınsa o bilinen plak
 **lev≤1 CLEAN WIN**: siyah +27pp, beyazda SIFIR yanlış-snap. Önişlemenin başaramadığını yaptı çünkü
 whitelist küçük/küratörlü → beyaz plakalar nadiren bir whitelist plakasına lev≤1 düşer.
 
+**Güven-kapısı denendi** (yalnız düşük-güvenli okumayı snap et): güvenli lev≤2'yi AÇMIYOR — T=0.85'te
+lev≤2 siyah %63.6 / 0 yanlış-snap, ama lev≤1 no-gate zaten %78.8 / 0 yanlış-snap ile daha iyi. Yani
+**lev≤1 güvenli optimum; lev≤2 (%97) yalnız %0.5 risk kabul edilirse.** Ek karmaşıklık gereksiz.
+
 ## Uygulama
 - `FrequentPlateRegistry.SnapTarget(compact, maxLev, includeFrequent)` — okumayı en yakın bilinen
   plakaya (whitelist önceliği; opsiyonel müdavimler) snap'ler. Erken-çıkışlı bounded Levenshtein.
