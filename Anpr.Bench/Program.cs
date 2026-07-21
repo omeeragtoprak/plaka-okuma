@@ -30,9 +30,80 @@ switch (mode)
     case "harvest": RunHarvest(args[1], args[2], opt); break;
     case "qscore": RunQScore(args[1], args.Length > 2 ? args[2] : "qscore.csv"); break;
     case "rectify": RunRectify(args[1], args.Length > 2 ? args[2] : "rectified.png", opt); break;
+    case "cropab": RunCropAb(args[1], opt); break;
     default: Usage(); break;
 }
 return;
+
+// ---------------------------------------------------------- CROP A/B (argmax vs TR gramer-kısıtlı çözümleme)
+// Kırpıntı-seviye A/B: aynı OCR slot-dağılımından ham argmax metni ile TrConstrainedDecoder çıktısını
+// gerçek-değere karşı karşılaştırır. Faz A'nın (varsayılan AÇIK) net katkısını offline ölçer.
+// CSV: image_path,plate_text (CSV'nin bulunduğu klasöre göreli). Örn:
+//   dotnet run -c Release --project Anpr.Bench -- cropab dataset/finetune/val.csv --ocr cct_xs_v2_erz.onnx
+void RunCropAb(string csvPath, BenchOptions o)
+{
+    string baseDir = Path.GetDirectoryName(Path.GetFullPath(csvPath)) ?? ".";
+    var lines = File.ReadAllLines(csvPath);
+    if (lines.Length < 2) { Console.WriteLine("boş CSV"); return; }
+    var header = lines[0].Split(',');
+    int iImg = Array.IndexOf(header, "image_path"), iPlate = Array.IndexOf(header, "plate_text");
+    if (iImg < 0 || iPlate < 0) { Console.WriteLine("image_path/plate_text kolonu gerekli"); return; }
+
+    static string Compact(string? s) => new string((s ?? "").Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+
+    // Emit floor (--minocr) üretim davranışını taklit eder: güven eşiği altındaki okuma YAYINLANMAZ
+    // (metin = "" boş). Negatif (boş-plaka) örnekte doğru davranış = boş üretmek. Böylece gramer
+    // decoder'ın halüsinasyonlarının floor tarafından geçitlenip geçitlenmediği ölçülür.
+    float floor = o.MinOcr;
+    using var rec = new Anpr.Core.Recognition.LicensePlateRecognizer(o.Ocr, o.OcrCfg, new Microsoft.ML.OnnxRuntime.SessionOptions());
+    int tot = 0, negTot = 0, argOk = 0, gramOk = 0, help = 0, hurt = 0, invalidFallback = 0;
+    int negHalluc = 0, negHallucGated = 0;   // negatiflerde gramer halüsinasyonu / floor ile geçitlenen
+    var helpEx = new List<string>(); var hurtEx = new List<string>();
+
+    foreach (var line in lines.Skip(1))
+    {
+        var cols = line.Split(',');
+        if (cols.Length <= Math.Max(iImg, iPlate)) continue;
+        string p = Path.Combine(baseDir, cols[iImg].Trim());
+        if (!File.Exists(p)) continue;
+        using var bmp = SKBitmap.Decode(p);
+        if (bmp == null) continue;
+
+        var res = rec.Recognize(bmp);
+        int slots = res.Alphabet.Length > 0 ? res.SlotProbs.Length / res.Alphabet.Length : 0;
+        string gt = Compact(cols[iPlate]);
+        bool isNeg = gt.Length == 0;
+
+        // argmax yolu: metin res.Text, güven res.MeanConfidence
+        string arg = res.MeanConfidence >= floor ? Compact(res.Text) : "";
+        // gramer yolu (üretim): dec.Ok ise metin+güven decoder'dan; değilse argmax'a düşer
+        var dec = Anpr.Core.TurkishPlates.TrConstrainedDecoder.Decode(res.SlotProbs, res.Alphabet, slots, o.SkipChar);
+        float gramConf = dec.Ok ? dec.Confidence : res.MeanConfidence;
+        string gramRaw = dec.Ok ? dec.Compact : Compact(res.Text);
+        string gram = gramConf >= floor ? gramRaw : "";
+        if (!dec.Ok) invalidFallback++;
+
+        tot++;
+        if (isNeg)
+        {
+            negTot++;
+            if (dec.Ok && dec.Compact.Length > 0) { negHalluc++; if (gramConf < floor) negHallucGated++; }
+        }
+        bool a = arg == gt, g = gram == gt;
+        if (a) argOk++;
+        if (g) gramOk++;
+        if (g && !a) { help++; if (helpEx.Count < 15) helpEx.Add($"{gt}: argmax={arg} -> gramer={gram} (conf {gramConf:F2})"); }
+        if (a && !g) { hurt++; if (hurtEx.Count < 15) hurtEx.Add($"{(isNeg ? "NEG" : gt)}: argmax={arg} -> gramer={gram} (conf {gramConf:F2})"); }
+    }
+
+    Console.WriteLine($"=== CROP A/B [{Path.GetFileName(csvPath)}] ocr={Path.GetFileName(o.Ocr)} skipchar={o.SkipChar} minocr(floor)={floor} ===");
+    Console.WriteLine($"  N={tot} (negatif={negTot})  argmax={argOk} ({100.0 * argOk / Math.Max(1, tot):F1}%)  " +
+                      $"gramer={gramOk} ({100.0 * gramOk / Math.Max(1, tot):F1}%)  net={gramOk - argOk:+0;-0;0}");
+    Console.WriteLine($"  gramer yardım={help}  zarar={hurt}  (geçersiz->argmax fallback: {invalidFallback})");
+    Console.WriteLine($"  negatif halüsinasyon: {negHalluc}/{negTot}  (floor {floor} ile geçitlenen: {negHallucGated})");
+    if (helpEx.Count > 0) { Console.WriteLine("  --- gramer YARDIM ---"); foreach (var e in helpEx) Console.WriteLine("    " + e); }
+    if (hurtEx.Count > 0) { Console.WriteLine("  --- gramer ZARAR ---"); foreach (var e in hurtEx) Console.WriteLine("    " + e); }
+}
 
 // ---------------------------------------------------------------- LABEL
 void RunLabel(string datasetDir, string camera, BenchOptions o)
