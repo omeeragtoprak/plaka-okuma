@@ -471,6 +471,8 @@ public sealed class CameraWorker : IAsyncDisposable
     {
         // Yön: OCR'dan bağımsız yön-izleyiciden plaka GENİŞLİĞİ eğilimi (son/erken yarı-max).
         // >1 yaklaşıyor, <1 uzaklaşıyor, -1 kararsız (yeterli kare yok). Yalnız roi izleri için anlamlı.
+        // NOT (2026-07-21 ölçümü): bu kapı geometrisinde boyut VE konum sinyalleri kanıtlı düz kalıyor
+        // (plaka yalnız yakın-durgun zonda tespit ediliyor); trend telemetri olarak taşınır (SizeTrend).
         float trend = scope == "roi" ? _direction.TrendFor(best.Box, now) : -1f;
 
         // Yalnız YAKLAŞAN araç: iz belirgin küçülüyorsa (uzaklaşıyor) roi olayını hiç üretme.
