@@ -10,6 +10,37 @@ inceleme/sentez devredilmez.
 
 ---
 
+## 0. AEP Gap Analizi (explore-formatı · `aep:explore`)
+
+Bu rapor artık [Agentic Engineering Protocol](https://github.com/omeeragtoprak/agentic-engineering-protocol)
+disiplini altında; aşağıdaki blok explore fazının zorunlu çıktısıdır (§3.1). Ayrıntı §1–§5'te.
+
+```
+As-Is (kodda doğrulanabilir):
+  1. Motor olgun: detect→OCR→çok-kareli oylama→emit; gündüz-açık parite kanıtlı; 94/94 test yeşil;
+     Faz A gramer-decoding emit-floor ile doğrulandı (docs/2026-07-21-gramer-decoder-kripinti-ab.md).
+  2. DLL: AnprRuntime.PlateDetected olayı SENKRON worker-thread'inde çağrılıyor, back-pressure yok
+     (AnprRuntime.cs:114); N kameradan eşzamanlı; sözleşme belirsiz.
+  3. Sevk edilen SDK'da kalıcılık/retry YOK — zero-loss yalnız sevk-EDİLMEYEN Anpr.Service'te.
+  4. Operasyon boşlukları: ffmpeg-eksik→sessiz başarı (Supervisor:136); ffmpeg-stderr LogDebug'da
+     (FfmpegFrameSource:299); panel varsayılan korumasız (Program.cs:98).
+  5. Senaryo: gündüz-açık ✓; kar/kapalı-otopark ÖLÇÜLMEDİ; motosiklet/plakasız/iki-satır/kuyruk BOŞLUK.
+To-Be:
+  - Otopark exe'sine GÜVENLE gömülebilen (net kontrat + back-pressure + config doğrulama),
+    SAHADA teşhis edilebilen (ffmpeg/health görünürlüğü), KVKK-uyumlu, tüm-senaryo-dayanıklı DLL.
+Gaps: bkz §2 — H1–H7 (critical/high), M1–M21 (medium), 27 low. En kritik 5 = §1 yönetici özeti.
+Unknowns:
+  - Hedef win-x64 PC'de sıfır ölçüm (ms/kare, AVX, ffmpeg varlığı); kar/kapalı-otopark verisi yok;
+    ⚠️ ile işaretli 37 bulgu bağımsız doğrulanmadı (verifier session-limit); SkipCharLevel=0.3 canlı doğrulanmadı.
+Baseline: `dotnet build OtoparkAnpr.sln -c Debug` + `dotnet test` → 94/94 YEŞİL (2026-07-21, .claude/aep-check.sh).
+```
+
+**Premise kontrolü (§3.1 skeptik):** Bu bir gap-AUDIT'i (uygulanmamış boşluklar), tekil değişiklik değil —
+kapanış her boşluğu ayrı bir AEP görevi (explore→plan→implement→verify) olarak sürmeli; `gap-auditor` her
+kapanışta kanıt talep etmeli. Motor doğruluğu zaafı DEĞİL; eksen = gömülebilirlik + operasyon + senaryo-kapsamı.
+
+---
+
 ## 1. Yönetici özeti
 
 Motor ve boru hattı olgun (gündüz-açık dilimde parite kanıtlı, 94 test, gece 11 bug kapatıldı). Ancak
