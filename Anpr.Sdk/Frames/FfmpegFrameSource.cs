@@ -24,6 +24,7 @@ public sealed class FfmpegFrameSource : IFrameSource
     private readonly ILogger _logger;
 
     private Task? _runTask;
+    private volatile Process? _activeProc;   // canlı ffmpeg süreci; Dispose/Stop bunu öldürüp asılı okumayı açar
     private byte[]? _latestFrame;
     private long _framesReceived;
     private volatile bool _connected;
@@ -82,6 +83,7 @@ public sealed class FfmpegFrameSource : IFrameSource
             try
             {
                 proc = StartFfmpeg();
+                _activeProc = proc;
                 _logger.LogInformation("[{Cam}] ffmpeg başlatıldı (pid {Pid})", _cameraId, proc.Id);
 
                 _ = PumpStderrAsync(proc, attemptCts.Token);
@@ -108,6 +110,7 @@ public sealed class FfmpegFrameSource : IFrameSource
                 // dokunan görev kalmasın (aksi halde disposed CTS -> gözlenmeyen istisna).
                 attemptCts.Cancel();
                 try { await watchdog.ConfigureAwait(false); } catch { /* yoksay */ }
+                _activeProc = null;
                 TryKill(proc);
             }
 
@@ -316,9 +319,18 @@ public sealed class FfmpegFrameSource : IFrameSource
 
     public async ValueTask DisposeAsync()
     {
+        // KRİTİK (öksüz ffmpeg): iptal token'ı asılı stdout okumasını her platformda kesmeyebilir
+        // (2026-07-07/07-21 saha vakası). Aktif süreci DOĞRUDAN öldür -> boru kapanır -> ReadFramesAsync
+        // döner -> RunAsync finally'si çalışır -> _runTask biter. Aksi halde ffmpeg öksüz kalıp Hikvision
+        // eşzamanlı-oturum sınırını tüketir (tekrarlayan "ffmpeg başladı ama kare yok" kısır döngüsü).
+        var p = _activeProc;
+        if (p != null)
+        {
+            try { if (!p.HasExited) p.Kill(entireProcessTree: true); } catch { /* yoksay */ }
+        }
         if (_runTask != null)
         {
-            try { await _runTask.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await _runTask.WaitAsync(TimeSpan.FromSeconds(10)); }
             catch { /* yoksay */ }
         }
     }

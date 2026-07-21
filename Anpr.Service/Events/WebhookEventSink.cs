@@ -107,7 +107,12 @@ public sealed class WebhookEventSink : IEventSink, IDisposable
             {
                 lock (_queueLock)
                 {
-                    var rest = pending.Skip(sent).ToArray();
+                    // KRİTİK (kayıp-güncelleme yarışı): gönderim kilitsizdi; bu sırada worker thread'leri
+                    // Enqueue ile SONA yeni satır eklemiş olabilir. Bayat 'pending'i geri yazmak o
+                    // eklenenleri siler (zero-loss ihlali). Bunun yerine dosyayı TAZE oku ve yalnız
+                    // ÖNden gönderdiğimiz 'sent' satırı at — append'ler sonda olduğundan korunur.
+                    var current = File.Exists(_queuePath) ? File.ReadAllLines(_queuePath) : System.Array.Empty<string>();
+                    var rest = current.Skip(sent).ToArray();
                     if (rest.Length == 0) File.Delete(_queuePath);
                     else File.WriteAllLines(_queuePath, rest);
                 }

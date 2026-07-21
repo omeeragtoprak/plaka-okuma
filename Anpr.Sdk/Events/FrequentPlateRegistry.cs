@@ -24,6 +24,21 @@ public sealed class FrequentPlateRegistry
     /// snap her zaman güvenlidir (küçük, küratörlü küme). Config'den doldurulur.</summary>
     public IReadOnlyCollection<string> KnownPlates { get; init; } = System.Array.Empty<string>();
 
+    /// <summary>Config'den gelen whitelist'i güvenle normalize eder: null/boş öğeler atlanır (bir
+    /// null girdi SDK init'ini çökertmemeli), boşluk/harf-dışı temizlenir, BÜYÜK harfe çevrilir.</summary>
+    public static HashSet<string> NormalizeKnownPlates(IEnumerable<string?>? plates)
+    {
+        var set = new HashSet<string>();
+        if (plates == null) return set;
+        foreach (var p in plates)
+        {
+            if (string.IsNullOrWhiteSpace(p)) continue;
+            var c = new string(p.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+            if (c.Length >= 5) set.Add(c);
+        }
+        return set;
+    }
+
     public bool IsFrequent(string compact)
         => _counts.TryGetValue(compact, out int n) && n >= MinSightings;
 

@@ -52,8 +52,7 @@ builder.Services.AddSingleton(sp =>
     var o = sp.GetRequiredService<IOptions<AnprServiceOptions>>().Value;
     var reg = new FrequentPlateRegistry
     {
-        KnownPlates = new HashSet<string>((o.KnownPlates ?? new()).Select(p =>
-            new string(p.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant())),
+        KnownPlates = FrequentPlateRegistry.NormalizeKnownPlates(o.KnownPlates),
     };
     int n = reg.LoadFromJsonl(Path.Combine(AppContext.BaseDirectory, "events.jsonl"));
     sp.GetRequiredService<ILogger<FrequentPlateRegistry>>()

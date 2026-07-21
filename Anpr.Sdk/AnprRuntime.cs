@@ -61,8 +61,7 @@ public sealed class AnprRuntime : IAsyncDisposable
         _logger = lf.CreateLogger<AnprRuntime>();
         FrequentPlates = new FrequentPlateRegistry
         {
-            KnownPlates = new HashSet<string>((options.KnownPlates ?? new()).Select(p =>
-                new string(p.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant())),
+            KnownPlates = FrequentPlateRegistry.NormalizeKnownPlates(options.KnownPlates),
         };
 
         var sinks = new List<IEventSink> { new DelegateEventSink(e => RaisePlateDetected(e)) };

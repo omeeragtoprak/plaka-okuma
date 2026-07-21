@@ -148,6 +148,16 @@ public sealed partial class AnprCameraSupervisor : IHostedService
             }
         }
 
+        // Sessiz yanlış-çalışmaya izin verme: yapılandırmada kamera VARDI ama hiçbiri başlayamadıysa
+        // (ör. model bulunamadı/bozuk, tüm RTSP kurulum hataları), fırlat. PMS "çalışıyor" sanıp hiç
+        // olay almamaktansa açık hata almalı. Kısmi başarı (bazı kameralar) kabul edilir.
+        int started;
+        lock (_workersLock) started = _workers.Count;
+        if (_options.Cameras.Count > 0 && started == 0)
+            throw new InvalidOperationException(
+                $"ANPR başlatılamadı: {_options.Cameras.Count} kameranın hiçbiri kurulamadı " +
+                "(model bulunamadı/bozuk ya da tüm kamera bağlantıları başarısız — yukarıdaki loglara bakın).");
+
         return Task.CompletedTask;
     }
 

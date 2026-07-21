@@ -65,4 +65,21 @@ public class FrequentPlateSnapTests
         var r = WithKnown("25TGG001");
         Assert.Equal("25TCG001", r.SnapTarget("25TCG001", maxLev: 0, includeFrequent: false));
     }
+
+    [Fact]
+    public void NormalizeKnownPlates_skips_null_and_blank_without_crashing()
+    {
+        // Config'de null/boş öğe SDK init'ini ÇÖKERTMEMELİ (inceleme bulgusu).
+        var set = FrequentPlateRegistry.NormalizeKnownPlates(new string?[] { "25 TGG 001", null, "", "  ", "25lt424", "x" });
+        Assert.Contains("25TGG001", set);
+        Assert.Contains("25LT424", set);   // boşluk temizlenir, büyük harfe çevrilir
+        Assert.DoesNotContain("X", set);    // <5 uzunluk atılır
+        Assert.Equal(2, set.Count);
+    }
+
+    [Fact]
+    public void NormalizeKnownPlates_handles_null_list()
+    {
+        Assert.Empty(FrequentPlateRegistry.NormalizeKnownPlates(null));
+    }
 }

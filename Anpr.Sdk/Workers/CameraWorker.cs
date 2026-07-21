@@ -497,7 +497,8 @@ public sealed class CameraWorker : IAsyncDisposable
 
         // Whitelist/müdavim SNAP: okuma bilinen bir plakaya lev≤SnapMaxLev yakınsa düzelt (siyah resmi
         // plaka gibi frekanslı araçların sistematik yanlış-okumasını düzeltir; ölçüm: lev≤1 siyah +27pp).
-        if (scope == "roi" && _options.SnapMaxLev > 0)
+        // Güven-kapısı: yüksek-güvenli okuma (gerçek farklı plaka olabilir) SnapMaxOcrConfidence ile korunur.
+        if (scope == "roi" && _options.SnapMaxLev > 0 && best.OcrConfidence < _options.SnapMaxOcrConfidence)
         {
             string snapped = _frequent.SnapTarget(compact, _options.SnapMaxLev, _options.SnapToFrequent);
             if (snapped != compact)
@@ -507,7 +508,11 @@ public sealed class CameraWorker : IAsyncDisposable
                 {
                     _logger.LogInformation("[{Cam}] plaka snap: '{Old}' -> '{New}' (bilinen/müdavim, lev≤{Lev})",
                         _camera.Id, best.Text, tr.Normalized, _options.SnapMaxLev);
-                    best = best with { Text = tr.Normalized!, RawText = tr.Compact! };
+                    // Aday listesini tutarlı tut: düzeltilmiş plakayı başa koy (olayın Plate'i ile aday[0] eşleşsin).
+                    var cands = new List<PlateCandidate> { new(tr.Compact!, best.OcrConfidence) };
+                    if (best.Candidates != null)
+                        foreach (var c in best.Candidates) if (c.Compact != tr.Compact) cands.Add(c);
+                    best = best with { Text = tr.Normalized!, RawText = tr.Compact!, Candidates = cands };
                     compact = tr.Compact!;
                 }
             }
@@ -607,18 +612,34 @@ public sealed class CameraWorker : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Döngü task'inin GERÇEKTEN bittiğini garanti et: aksi halde motoru (ONNX) ve kırpıntıları
+        // (SKBitmap) döngü hâlâ Recognize/StoreCrop yaparken dispose etmek NATIVE use-after-dispose
+        // (yakalanamaz access violation) -> tüm PMS çöker. Döngü iptalden sonra bir sonraki denetim
+        // noktasında çıkar; 30 sn zayıf-CPU'daki en ağır tek iterasyon için fazlasıyla yeter.
+        bool loopStopped = _loopTask == null;
         if (_loopTask != null)
         {
-            try { await _loopTask.WaitAsync(TimeSpan.FromSeconds(5)); } catch { /* yoksay */ }
+            try { await _loopTask.WaitAsync(TimeSpan.FromSeconds(30)); loopStopped = true; }
+            catch { loopStopped = _loopTask.IsCompleted; }
         }
 
         // Bekleyen yayınları en fazla 5 sn boşalt (kapanışta son olayları kaybetme).
         try { await Task.WhenAll(_pendingPublishes).WaitAsync(TimeSpan.FromSeconds(5)); } catch { /* yoksay */ }
 
-        foreach (var b in _cropBuckets) b.DisposeAll();
-        _cropBuckets.Clear();
-
+        // Frame source dispose'u döngüden bağımsız güvenli (ffmpeg'i öldürür) — HER ZAMAN.
         await _frameSource.DisposeAsync();
-        _engine.Dispose();
+
+        if (loopStopped)
+        {
+            foreach (var b in _cropBuckets) b.DisposeAll();
+            _cropBuckets.Clear();
+            _engine.Dispose();
+        }
+        else
+        {
+            // Döngü durmadı: native dispose ATLA (çökme önlemi); kaynak GC/süreç sonuna bırakılır.
+            _logger.LogWarning("[{Cam}] okuma döngüsü 30s'de durmadı; motor/kırpıntı native dispose atlandı " +
+                               "(use-after-dispose çökme önlemi)", _camera.Id);
+        }
     }
 }

@@ -190,6 +190,12 @@ public sealed class AnprServiceOptions
     /// kaydı yanlış-okumalarla kirlenebileceğinden varsayılan KAPALI (canlı doğrulama sonrası açılır).</summary>
     public bool SnapToFrequent { get; set; } = false;
 
+    /// <summary>Güven-kapısı: yalnız OCR güveni bu değerin ALTINDA olan okumayı snap et. Yüksek-güvenli
+    /// bir okuma whitelist plakasına yakın olsa bile GERÇEK farklı bir plaka olabilir (yanlış-snap riski);
+    /// bunu düşürmek (ör. 0.90) yüksek-güvenli okumaları korur. 1.0 = kapı yok (offline lev≤1'de 0
+    /// yanlış-snap ölçüldü — varsayılan). Daha büyük whitelist/lev≤2 için düşürmek güvenli olur.</summary>
+    public float SnapMaxOcrConfidence { get; set; } = 1.0f;
+
     /// <summary>
     /// Emit-sonrası varyant bastırma penceresi (sn): yeni emitin plakası, aynı kameranın/kapsamın son
     /// emitlerinden birinin ADAY listesinde geçiyorsa (veya birebir aynıysa) yeni OLAY yayınlanmaz —
