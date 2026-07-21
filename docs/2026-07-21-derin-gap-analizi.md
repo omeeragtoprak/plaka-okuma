@@ -74,6 +74,8 @@ kritik 5 boşluk **bariyer davranışını ve saha teşhisini** etkiliyor, motor
 | H6 | ⚠️ | Windows servis barındırma kodu yok (dokümante edilen oto-başlat/çökme-restart yok) | `Anpr.Service.csproj` | "7/24 oto-başlat" iddiası uygulanmamış; çökünce elle başlatma | Microsoft.Extensions.Hosting.WindowsServices + kurulum betiği |
 | H7 | ⚠️ | Webhook kuyruk-derinliği + disk metriği /health ve heartbeat'te yok | `Program.cs:149` | Kayıt-webhook kuyruğu birikirse (downstream down) fark edilmez → sessiz kayıt kaybı | /health'e queueDepth+diskFree; heartbeat'e kuyruk sayacı |
 
+> **Kapanış (2026-07-21, AEP döngüsü):** ✅ **H2 KAPANDI** — `FfmpegFrameSource.EnsureAvailable` açılış probe'u, `AnprCameraSupervisor.StartAsync`'te fail-fast; eksik ffmpeg artık NET hata. ✅ **H3 KAPANDI** — ffmpeg stderr LogDebug→LogWarning (üretimde görünür). adversarial-reviewer NOT REFUTED (0 blocker), 95 test yeşil. Kalan critical/high: H1, H4 (plan+onay gerektirir), H5–H7.
+
 ### MEDIUM
 
 | # | Dv | Boşluk | Yer | Not |

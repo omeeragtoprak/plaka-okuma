@@ -69,6 +69,48 @@ public sealed class FfmpegFrameSource : IFrameSource
         _runTask = Task.Run(() => RunAsync(cancellationToken), CancellationToken.None);
     }
 
+    /// <summary>ffmpeg ikilisinin BAŞLATILABİLİR olduğunu açılışta doğrular (H2 — fail-fast). ffmpeg
+    /// yoksa/PATH'te değilse, StartFfmpeg her denemede Win32Exception atıp SESSİZCE sonsuz yeniden-bağlanır
+    /// (kare gelmez, bariyer hiç açılmaz, StartAsync başarı döner). Bu probe onu açılışta NET config
+    /// hatasına çevirir. Path="ffmpeg" PATH'e dayandığından File.Exists yetmez — gerçekten başlatmayı dener.</summary>
+    public static void EnsureAvailable(FfmpegOptions opts)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = opts.Path,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-version");
+
+        Process? proc;
+        try
+        {
+            proc = Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"ffmpeg başlatılamadı (yol: '{opts.Path}'): {ex.Message}. ffmpeg KURULU ve PATH'te olmalı " +
+                "(ya da AnprServiceOptions.Ffmpeg.Path ile tam yolu verin). ffmpeg olmadan kameralardan kare " +
+                "okunamaz — bariyer hiç açılmaz.", ex);
+        }
+        if (proc == null)
+            throw new InvalidOperationException($"ffmpeg başlatılamadı (yol: '{opts.Path}'): süreç oluşturulamadı.");
+        try
+        {
+            // Pipe'ları boşalt: tam ffmpeg build'inin `-version` çıktısı (çok-KB 'configuration:' satırı)
+            // Windows'un ~4KB pipe tamponunu taşırsa süreç yazımda bloklar → gereksiz 5s açılış gecikmesi.
+            // Asenkron drenaj EOF'a (süreç çıkışı) kadar okur; içerik kullanılmıyor, yalnız tampon açılıyor.
+            _ = proc.StandardOutput.ReadToEndAsync();
+            _ = proc.StandardError.ReadToEndAsync();
+            if (!proc.WaitForExit(5000)) { try { proc.Kill(entireProcessTree: true); } catch { /* yoksay */ } }
+        }
+        finally { proc.Dispose(); }
+    }
+
     private async Task RunAsync(CancellationToken ct)
     {
         int attempt = 0;
@@ -295,8 +337,11 @@ public sealed class FfmpegFrameSource : IFrameSource
             string? line;
             while ((line = await proc.StandardError.ReadLineAsync(ct)) != null)
             {
+                // ffmpeg -loglevel error ile çalışıyor (StartFfmpeg) → stderr yalnız GERÇEK hataları
+                // içerir (bağlantı/auth/timeout/codec). Warning'de yayınla ki kameranın çalışmama
+                // SEBEBİ üretimde (Information seviyesi) görünür olsun (H3 — saha teşhisi).
                 if (!string.IsNullOrWhiteSpace(line))
-                    _logger.LogDebug("[{Cam}] ffmpeg: {Line}", _cameraId, line);
+                    _logger.LogWarning("[{Cam}] ffmpeg: {Line}", _cameraId, line);
             }
         }
         catch (OperationCanceledException) { /* normal */ }

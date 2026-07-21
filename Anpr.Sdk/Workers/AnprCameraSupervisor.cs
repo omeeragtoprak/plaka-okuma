@@ -92,6 +92,12 @@ public sealed partial class AnprCameraSupervisor : IHostedService
         VerifyModelHash(detector, _options.DetectorModelSha256, "dedektör");
         VerifyModelHash(ocr, _options.OcrModelSha256, "ocr");
 
+        // ffmpeg erişilebilirlik probe'u (H2): kamera varsa ffmpeg şart. Yoksa StartFfmpeg her denemede
+        // Win32Exception atıp SESSİZCE sonsuz yeniden-bağlanır (kare yok, bariyer hiç açılmaz, StartAsync
+        // başarı döner). Açılışta NET hata ver — model-hash guard'ıyla aynı "sessizce çalışma" ailesi.
+        if (_options.Cameras.Count > 0)
+            Frames.FfmpegFrameSource.EnsureAvailable(_options.Ffmpeg);
+
         if (_options.Cameras.Count == 0)
             _logger.LogWarning("Yapılandırmada kamera yok (Anpr:Cameras boş).");
 
