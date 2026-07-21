@@ -58,9 +58,19 @@ sabaha karşı uyandıran türden) önler. Çalışan servis hâlâ eski (buggy)
 uygun görürsen Release'i yeniden derleyip servisi yeniden başlat (varsayılanlar güvenli: snap kapalı,
 yön kapalı). Not: 07-21'in KAMERA-tarafı outage'ını bu düzeltme önlemez (o fiziksel).
 
+## 5) Nihai QA (regresyon doğrulaması)
+Çok sayıda confirmer/emit değişikliği yapıldığından genel doğruluğun bozulmadığı doğrulandı:
+- **91/91 birim test** (confirmer oylama + whitelist-snap + OCR recognizer boyut-doğrulaması kapsıyor).
+- **OCR model kırpıntı-exact regresyonu TEMİZ**: val %78.4 (ref %76.4 — biraz yüksek), gece %84.0
+  (ref'le birebir). Shipping model/config doğru (yanlışlıkla model takası yok).
+- **Confirmer sadeleştirme diff'i**: silinen her satır etkisiz *yön/alan-trend telemetrisi*; karakter-oylama
+  mantığına DOKUNULMADI → doğruluk regresyonu yok. Referans örnek (`PmsOrnek`) üretim-kalite iskelete
+  çevrildi (deney env'leri temizlendi, KnownPlates aktivasyonu gösterildi).
+
 ## Durum
-- Tüm değişiklikler test-geçmiş (85/85), config-gated, **varsayılan davranış değişmedi** (güvenli).
-- Commit + GitHub push yapıldı. Kod: DirectionTracker (telemetri), whitelist-snap (aktivasyon bekliyor).
+- Tüm değişiklikler test-geçmiş (**91/91**), config-gated, **varsayılan davranış değişmedi** (güvenli).
+- Commit + GitHub push yapıldı. Kod: DirectionTracker (telemetri), whitelist-snap (aktivasyon bekliyor),
+  OCR model/config uyuşmazlık koruması + testleri, PmsOrnek referans temizliği.
 - Canlı servisin ikilisi değiştirilmedi (deneysel kod prod'a dağıtılmadı).
 
 ## Sıradaki (öncelik)
