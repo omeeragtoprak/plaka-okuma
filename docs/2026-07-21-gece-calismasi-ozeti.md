@@ -38,6 +38,19 @@ yörünge sinyalleri elendi. `RequireApproaching` varsayılan KAPALI. → `docs/
 gözlemine uygun), (B) çapraz-kamera dedup (modelsiz, koordineli), (C) yön filtresini bırak + enerjiyi
 siyah-plaka fix'ine ver.
 
+## 4) SDK kalite denetimi — 7 gerçek bug düzeltildi (17-ajan düşman incelemesi)
+DLL teslim öncesi kalite denetimi. Doğrulanmış + düzeltilenler:
+- **ffmpeg öksüzlüğü (YÜKSEK)**: Stop'ta iptal asılı okumayı kesmediğinden ffmpeg öksüz kalıp
+  Hikvision oturum sınırını tüketiyordu — **tam da tekrarlayan kamera-takılma sorununun kök nedeni!**
+  Aktif süreç DisposeAsync'te doğrudan öldürülür.
+- **DisposeAsync use-after-dispose (orta)**: döngü koşarken motor(ONNX)/kırpıntı(Skia) dispose → PMS
+  çökmesi; artık yalnız döngü durduysa native dispose.
+- **Webhook zero-loss ihlali (orta)**: retry bayat snapshot'la eklenen olayları siliyordu → taze oku.
+- **Supervisor sessiz-hata**: tüm kameralar başarısızsa fırlatır (sözleşme).
+- **KnownPlates null crash (yeni kod)**: null öğe SDK init'i çökertiyordu → filtrelenir.
+- Snap güven-kapısı + aday-listesi tutarlılığı (yeni kod sağlamlaştırma).
+- 87/87 test.
+
 ## Durum
 - Tüm değişiklikler test-geçmiş (85/85), config-gated, **varsayılan davranış değişmedi** (güvenli).
 - Commit + GitHub push yapıldı. Kod: DirectionTracker (telemetri), whitelist-snap (aktivasyon bekliyor).
