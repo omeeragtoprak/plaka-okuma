@@ -85,7 +85,7 @@ kritik 5 boşluk **bariyer davranışını ve saha teşhisini** etkiliyor, motor
 | M3 | ✅ | Kuyrukta ROI-içi çok plaka → hepsi roi emit; hedef-araç seçimi yok | `AnprEngine.cs:222` | Bariyer yanlış araca açılabilir; "en büyük+en alttaki" kuralı yok |
 | M4 | ✅ | Sevk edilen SDK'da kalıcılık/retry YOK (zero-loss yalnız Service'te) | `AnprRuntime.cs:94` | PMS entegratörü webhook-kuyruğunu kendi yazmalı; belgelenmeli |
 | M5 | ✅ | PlateEvent/webhook yükünde şema/sözleşme sürümü yok | `PlateEvent.cs:8` | Alan değişince PMS sessizce kırılır; `schemaVersion` ekle |
-| M6 | ✅ | Açılışta config DOĞRULAMA yok — aralık-dışı eşik sessizce kabul, bariyer sessizce hiç açılmaz | `AnprRuntime.cs:59` | ctor'da Validate(): fps>0, eşikler [0,1], en az 1 kamera vb. |
+| M6 | ✅ KAPANDI | Açılışta config DOĞRULAMA yok — aralık-dışı eşik sessizce kabul, bariyer sessizce hiç açılmaz | `AnprServiceOptions.cs` | ✅ `Validate()` (fps>0, eşikler [0,1], port, kamera RtspUrl/Ip, yinelenen Id) → tüm sorunları tek net hatada; `AnprCameraSupervisor.StartAsync` başında (DLL+Service ortak). adversarial NOT REFUTED; 118 test |
 | M7 | ✅ | SDK options, SDK'nın UYGULAMADIĞI alanları içeriyor (WebhookUrl sessizce yok sayılır) | `AnprServiceOptions.cs:277` | Sunucu-only alanları ayır veya "SDK'da etkisiz" işaretle/uyar |
 | M8 | ✅ | MaskPlatesInLogs SDK'da fiilen etkisiz — worker tam plakayı loglar | `CameraWorker.cs:510` (+Service:201) | KVKK; tüm log yollarında maskeleme uygula |
 | M9 | ✅ | KVKK budaması camera-records.jsonl + corrections.jsonl için yok — plaka PII süresiz birikir | `CameraRecordPoller.cs:40` | events.jsonl gibi retention-rotasyon uygula |

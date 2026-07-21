@@ -293,6 +293,44 @@ public sealed class AnprServiceOptions
     public FfmpegOptions Ffmpeg { get; set; } = new();
 
     public List<CameraOptions> Cameras { get; set; } = new();
+
+    /// <summary>Açılışta yapılandırmayı doğrular (M6). Aralık-dışı eşik/fps/port SESSİZCE kabul edilip
+    /// bariyerin hiç açılmamasına yol açmasın diye TÜM sorunları toplayıp tek net hata fırlatır.
+    /// Konservatif: yalnız açıkça-geçersiz değerler yakalanır (üretim varsayılanları her zaman geçer).</summary>
+    public void Validate()
+    {
+        var errs = new List<string>();
+        void Range01(float v, string name) { if (v < 0f || v > 1f) errs.Add($"{name}={v} [0,1] aralığında olmalı (tipik hata: 0.45 yerine 45 → hiç emit olmaz)"); }
+
+        if (Fps <= 0) errs.Add($"Fps={Fps} > 0 olmalı");
+        if (IdleFps < 0) errs.Add($"IdleFps={IdleFps} >= 0 olmalı");
+        Range01(MinConfidence, nameof(MinConfidence));
+        Range01(DetectorScoreThreshold, nameof(DetectorScoreThreshold));
+        Range01(EmitMinConfidence, nameof(EmitMinConfidence));
+        Range01(EmitMinOcrConfidence, nameof(EmitMinOcrConfidence));
+        Range01(SnapMaxOcrConfidence, nameof(SnapMaxOcrConfidence));
+        Range01(EarlyEmitMinOcr, nameof(EarlyEmitMinOcr));
+        if (MinConfirmations < 1) errs.Add($"MinConfirmations={MinConfirmations} >= 1 olmalı");
+        if (SnapMaxLev < 0) errs.Add($"SnapMaxLev={SnapMaxLev} >= 0 olmalı");
+        if (CropPaddingRatio < 0) errs.Add($"CropPaddingRatio={CropPaddingRatio} >= 0 olmalı");
+        if (HttpPort is < 1 or > 65535) errs.Add($"HttpPort={HttpPort} 1..65535 olmalı");
+
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < Cameras.Count; i++)
+        {
+            var c = Cameras[i];
+            string tag = string.IsNullOrWhiteSpace(c.Id) ? $"Cameras[{i}]" : $"kamera '{c.Id}'";
+            if (string.IsNullOrWhiteSpace(c.Id)) errs.Add($"{tag}: Id boş olamaz");
+            else if (!seenIds.Add(c.Id)) errs.Add($"kamera Id '{c.Id}' yinelenmiş (benzersiz olmalı)");
+            if (string.IsNullOrWhiteSpace(c.RtspUrl) && string.IsNullOrWhiteSpace(c.Ip))
+                errs.Add($"{tag}: RtspUrl ya da Ip verilmeli (aksi halde bağlanılamaz, sessizce)");
+        }
+
+        if (errs.Count > 0)
+            throw new InvalidOperationException(
+                "ANPR yapılandırması GEÇERSİZ (düzeltilmezse bariyer sessizce hiç açılmayabilir):\n  - "
+                + string.Join("\n  - ", errs));
+    }
 }
 
 public sealed class CameraOptions

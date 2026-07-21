@@ -64,6 +64,7 @@ public sealed partial class AnprCameraSupervisor : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        _options.Validate();   // M6: aralık-dışı eşik/fps/port SESSİZCE kabul edilip bariyer hiç açılmasın
         StartedAtUtc = DateTimeOffset.UtcNow;
         _cts = new CancellationTokenSource(); // yeniden başlatılabilirlik: taze token kaynağı
 
