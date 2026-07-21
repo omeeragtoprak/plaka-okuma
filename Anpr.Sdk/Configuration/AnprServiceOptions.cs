@@ -152,12 +152,14 @@ public sealed class AnprServiceOptions
     public int CandidateCount { get; set; } = 5;
 
     /// <summary>
-    /// Yalnız YAKLAŞAN aracı yayınla: DirectionTracker plaka GENİŞLİĞİ eğilimini (OCR'dan bağımsız, her
-    /// tespit kutusundan) izler; iz belirgin küçülüyorsa (araç uzaklaşıyor, arka plaka) roi olayı
-    /// bastırılır. Recall-öncelikli: kararsız/kısa izler (trend=-1) daima geçer. Hikvision "Yön: İleri"
-    /// filtresinin CPU-dostu muadili. Kapatmak: false.
+    /// Yalnız YAKLAŞAN aracı yayınla: DirectionTracker plaka GENİŞLİĞİ eğilimini izler; iz belirgin
+    /// küçülüyorsa (uzaklaşıyor) roi olayı bastırılır. VARSAYILAN KAPALI: 4 canlı koşuda (2026-07-14)
+    /// bu geometride KANITLI ETKİSİZ — plaka ancak araç kapıya gelip DURUNCA (boyut donmuş) net
+    /// tespit edildiğinden trend hep ~1.0 çıkıyor; ayırt edici boyut değişimi araç uzaktayken (tespit
+    /// güvenilmez) oluyor. Doğru sinyal muhtemelen HAREKET-YOLU (konum yönü) — kameralar dönünce
+    /// denenecek. Bu bayrak açılsa da güvenli (0 yanlış-bastırma ölçüldü) ama pratikte iş yapmaz.
     /// </summary>
-    public bool RequireApproaching { get; set; } = true;
+    public bool RequireApproaching { get; set; } = false;
 
     /// <summary>Uzaklaşıyor eşiği: son-yarı-max / erken-yarı-max plaka GENİŞLİK oranı bu değerin ALTINDAYSA
     /// "uzaklaşıyor" sayılır. Yarı-başına-max mülayim küçülmeyi yumuşattığı için 0.85 (belirgin küçülmeyi

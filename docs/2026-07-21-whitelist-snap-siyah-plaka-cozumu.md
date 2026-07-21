@@ -43,7 +43,21 @@ whitelist küçük/küratörlü → beyaz plakalar nadiren bir whitelist plakas�
 ```
 Boşluk/format serbest (normalize edilir). lev≤1 sıfır-risk; daha agresif düzeltme için 2 (ölçülü risk).
 
+## Neden auto-müdavim YETMEZ (manuel whitelist ŞART)
+events.jsonl (14 gün, ≥0.98 & ≥5 kez müdavim kuralı) analizi: **en kötü siyah plakalar müdavim DEĞİL**
+— tavuk-yumurta: sürekli yanlış okundukları için ≥0.98'e nadiren ulaşıp müdavim setine giremiyorlar:
+| plaka | ≥0.98 görülme | müdavim mi |
+|---|---|---|
+| 25TGG001 | 2 | HAYIR |
+| 25LT424 | 1 | HAYIR |
+| 25LT333 | 0 | HAYIR |
+| 25ACV240 | 8 | evet (bu daha sık doğru okunuyor) |
+
+Ayrıca auto-müdavim havuzu büyük (235 plaka) → yanlış-snap riski manuel whitelist'ten (birkaç plaka)
+yüksek. Bu yüzden `SnapToFrequent` varsayılan KAPALI; **çözüm için kullanıcı `KnownPlates`'i doldurmalı.**
+
 ## Kalan
 - **Canlı doğrulama** (kameralar RTSP arızasından dönünce): snap loglarını izle, yanlış-snap var mı bak.
-- Resmi araç plakalarının TAM listesi kullanıcıdan alınmalı (rapor yalnız 2'sini biliyor: 25LT424, 25TGG001).
+- Resmi araç plakalarının TAM listesi kullanıcıdan alınmalı (rapor 2'sini biliyor: 25LT424, 25TGG001;
+  bu gece +25LT333, 25ACV240 gözle doğrulandı). Kullanıcının tüm protokol araç listesi gerekir.
 - Skor etkisi (doğrulama sonrası): doğruluk boyutu, siyah-plaka hücresi büyük kazanç.
