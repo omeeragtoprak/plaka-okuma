@@ -48,7 +48,12 @@ public sealed class InMemoryEventStore : IEventSink
                 }
                 catch { /* bozuk satır atlanır */ }
             }
-            File.WriteAllLines(_persistPath, kept);
+            // ATOMİK yeniden yazım: doğrudan WriteAllLines çökme anında dosyayı truncate edip TÜM event
+            // geçmişini (KVKK/denetim kaydı) kaybettirir. Temp dosyaya yaz, sonra atomik Move ile değiştir
+            // (aynı klasör = aynı volüm → atomik). Çökme olsa bile eski dosya bozulmadan kalır.
+            var tmp = _persistPath + ".tmp";
+            File.WriteAllLines(tmp, kept);
+            File.Move(tmp, _persistPath, overwrite: true);
 
             foreach (var line in kept.TakeLast(_capacity))
             {
