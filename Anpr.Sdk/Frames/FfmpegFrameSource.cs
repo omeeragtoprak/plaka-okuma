@@ -28,7 +28,10 @@ public sealed class FfmpegFrameSource : IFrameSource
     private byte[]? _latestFrame;
     private long _framesReceived;
     private volatile bool _connected;
-    private DateTimeOffset? _lastFrameUtc;
+    // Son kare zamanı UTC-ticks olarak (0 = henüz kare yok). PMS thread'i IsConnected/LastFrameUtc'yi
+    // KENDİ thread'inden okur; DateTimeOffset? (>8 bayt, nullable) atomik değil → torn-read olası idi.
+    // long okuma/yazma 64-bit'te atomik; Volatile ile görünürlük. (Concurrency-hijyeni, 2026-07-22).
+    private long _lastFrameTicks;
     private DateTimeOffset _attemptStartUtc;
     private bool _gotFrameThisAttempt;
     private int _restartCount;
@@ -52,13 +55,16 @@ public sealed class FfmpegFrameSource : IFrameSource
         get
         {
             if (!_connected) return false;
-            var last = _lastFrameUtc;
-            if (last == null) return false;
+            long ticks = Volatile.Read(ref _lastFrameTicks);
+            if (ticks == 0) return false;
             double staleSec = Math.Max(30, _opts.NoFrameTimeoutSeconds * 3);
-            return (DateTimeOffset.UtcNow - last.Value).TotalSeconds < staleSec;
+            return (DateTimeOffset.UtcNow.UtcTicks - ticks) / (double)TimeSpan.TicksPerSecond < staleSec;
         }
     }
-    public DateTimeOffset? LastFrameUtc => _lastFrameUtc;
+    public DateTimeOffset? LastFrameUtc
+    {
+        get { long t = Volatile.Read(ref _lastFrameTicks); return t == 0 ? null : new DateTimeOffset(t, TimeSpan.Zero); }
+    }
     public long FramesReceived => Interlocked.Read(ref _framesReceived);
     public int RestartCount => _restartCount;
 
@@ -299,7 +305,7 @@ public sealed class FfmpegFrameSource : IFrameSource
     private void OnFrame(byte[] frame)
     {
         Volatile.Write(ref _latestFrame, frame);
-        _lastFrameUtc = DateTimeOffset.UtcNow;
+        Volatile.Write(ref _lastFrameTicks, DateTimeOffset.UtcNow.UtcTicks);
         Interlocked.Increment(ref _framesReceived);
         _connected = true;
         _gotFrameThisAttempt = true;
@@ -313,7 +319,8 @@ public sealed class FfmpegFrameSource : IFrameSource
             while (!attemptToken.IsCancellationRequested)
             {
                 await Task.Delay(1000, attemptToken);
-                var reference = _lastFrameUtc ?? _attemptStartUtc;
+                long lastTicks = Volatile.Read(ref _lastFrameTicks);
+                var reference = lastTicks == 0 ? _attemptStartUtc : new DateTimeOffset(lastTicks, TimeSpan.Zero);
                 if ((DateTimeOffset.UtcNow - reference).TotalSeconds > _opts.NoFrameTimeoutSeconds)
                 {
                     _logger.LogWarning("[{Cam}] {Sec}s boyunca kare gelmedi; ffmpeg yeniden başlatılıyor",

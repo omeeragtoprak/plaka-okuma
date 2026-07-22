@@ -103,6 +103,8 @@ kritik 5 boşluk **bariyer davranışını ve saha teşhisini** etkiliyor, motor
 | M21 | ⚠️ | Sürüm iki csproj'de 0.9.0 sabit; Sdk→Core NuGet bağımlılığı pack sürümüne sabit | `Anpr.Sdk.csproj:13` | Tek `<Version>` (Directory.Build.props); SemVer + CI tag'i |
 
 ### LOW (özet — tam liste workflow çıktısında)
+> **Eşzamanlılık-hijyeni kapanışı (2026-07-22):** ✅ `_pendingPublishes` dispose-yarışı KAPANDI (flush loopStopped'a geçitlendi); ✅ FfmpegFrameSource `_lastFrameUtc` torn-read KAPANDI (atomik `long` ticks + Volatile). Şüpheci-doğrulama sonucu: `FrameMsPercentile` [25] İYİ-HUYLU (double eleman yazımı atomik, crash yok) → dokunulmadı; `LongRunning`-task micro-opt'u REDDEDİLDİ (LoopAsync async-await'te pool'u zaten bırakıyor, fayda ölçülemez). adversarial-reviewer NOT REFUTED (davranış korundu), 124 test.
+
 Kaynak/temizlik: `_pendingPublishes` dispose-thread yarışı (L, `CameraWorker.cs:627`); çift-Start non-atomik
 (`AnprRuntime.cs:79`); ONNX çıkarımı LongRunning değil→havuz açlığı (`CameraWorker.cs:138`); Dispose kendi
 kendine iptal etmiyor 30s bloklar (`CameraWorker.cs:613`); Start/Stop CancellationToken yok sayılıyor

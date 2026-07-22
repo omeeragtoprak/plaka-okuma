@@ -626,8 +626,13 @@ public sealed class CameraWorker : IAsyncDisposable
             catch { loopStopped = _loopTask.IsCompleted; }
         }
 
-        // Bekleyen yayınları en fazla 5 sn boşalt (kapanışta son olayları kaybetme).
-        try { await Task.WhenAll(_pendingPublishes).WaitAsync(TimeSpan.FromSeconds(5)); } catch { /* yoksay */ }
+        // Bekleyen yayınları en fazla 5 sn boşalt (kapanışta son olayları kaybetme). YALNIZ döngü
+        // durduysa: aksi halde loop thread hâlâ _pendingPublishes.Add yapabilir → List thread-safe
+        // olmadığından WhenAll'ın enumerate'i ile yarışır (engine-dispose ile aynı loopStopped-geçidi).
+        if (loopStopped)
+        {
+            try { await Task.WhenAll(_pendingPublishes).WaitAsync(TimeSpan.FromSeconds(5)); } catch { /* yoksay */ }
+        }
 
         // Frame source dispose'u döngüden bağımsız güvenli (ffmpeg'i öldürür) — HER ZAMAN.
         await _frameSource.DisposeAsync();
