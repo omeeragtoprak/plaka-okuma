@@ -55,7 +55,7 @@ Console.WriteLine($"ANPR çalışıyor ({options.Cameras.Count} kamera, CPU: {ru
 // Üretimde: uygulama ömrü boyunca çalışır; kapanışta StopAsync (aşağıdaki 'await using' halleder).
 await Task.Delay(TimeSpan.FromSeconds(60));
 
-foreach (var cam in runtime.Cameras)
+foreach (var cam in runtime.CameraStatus)   // salt-okunur durum görünümü (M1)
     Console.WriteLine($"[{cam.CameraId}] bağlı={cam.IsConnected} kare={cam.FramesReceived} " +
                       $"işlenen={cam.FramesProcessed} p50={cam.FrameMsP50}ms p95={cam.FrameMsP95}ms olay={cam.EventsEmitted}");
 Console.WriteLine($"Toplam roi olayı: {eventCount}");

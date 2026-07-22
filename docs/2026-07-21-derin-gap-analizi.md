@@ -80,7 +80,7 @@ kritik 5 boşluk **bariyer davranışını ve saha teşhisini** etkiliyor, motor
 
 | # | Dv | Boşluk | Yer | Not |
 |---|----|--------|-----|-----|
-| M1 | ✅ | CameraWorker public API'de sızıyor (somut mutable, public Start/DisposeAsync) | `CameraWorker.cs:134`, `AnprRuntime.cs:47` | Salt-okunur `ICameraStatus` arayüzü dışa ver — yoksa her iç değişiklik kırıcı |
+| M1 | ✅ KAPANDI | CameraWorker public API'de sızıyor (somut mutable, public Start/DisposeAsync) | `AnprRuntime.cs` | ✅ `ICameraStatus` (salt-okunur) + `AnprRuntime.CameraStatus`; CameraWorker implement eder (covariance, non-breaking); eski `Cameras` `[Obsolete]` (migrasyon); sample güncellendi; reflection-testli lifecycle-sızıntı yok |
 | M2 | ✅+🔷 | Olay işleyici SENKRON worker thread'inde + N kameradan EŞZAMANLI + back-pressure yok | `AnprRuntime.cs:92,114` (birleşik: 7,8,26,38) | Yavaş PMS handler'ı boru hattını durdurur+kare düşürür; iki kamera aynı handler'a yarışır. Tek-dispatcher bounded-queue + XML-doc'ta "eşzamanlı+hızlı-dönmeli" |
 | M3 | ✅ | Kuyrukta ROI-içi çok plaka → hepsi roi emit; hedef-araç seçimi yok | `AnprEngine.cs:222` | Bariyer yanlış araca açılabilir; "en büyük+en alttaki" kuralı yok |
 | M4 | ✅ | Sevk edilen SDK'da kalıcılık/retry YOK (zero-loss yalnız Service'te) | `AnprRuntime.cs:94` | PMS entegratörü webhook-kuyruğunu kendi yazmalı; belgelenmeli |

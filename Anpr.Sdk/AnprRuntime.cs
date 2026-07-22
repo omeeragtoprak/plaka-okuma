@@ -43,8 +43,14 @@ public sealed class AnprRuntime : IAsyncDisposable
     /// geçmiş bir events.jsonl ile tohumlanabilir: <c>FrequentPlates.LoadFromJsonl(yol)</c>.</summary>
     public FrequentPlateRegistry FrequentPlates { get; }
 
-    /// <summary>Kamera durum/sayaç görünümü (bağlantı, kare hızı, p50/p95 ms, olay sayısı) — PMS
-    /// kendi sağlık ekranında gösterebilir.</summary>
+    /// <summary>Kamera SALT-OKUNUR durum görünümü (bağlantı, kare hızı, p50/p95 ms, olay sayısı) — PMS
+    /// kendi sağlık ekranında gösterebilir. Somut CameraWorker sızdırmaz (M1).</summary>
+    public IReadOnlyList<ICameraStatus> CameraStatus => _supervisor.Workers;
+
+    /// <summary>Kamera durum görünümü. SOMUT CameraWorker'ı (public Start/DisposeAsync lifecycle
+    /// metotları dahil — yanlış çağrılırsa runtime bozulur) sızdırır.</summary>
+    [Obsolete("Salt-okunur durum için CameraStatus (IReadOnlyList<ICameraStatus>) kullanın; Cameras " +
+              "somut CameraWorker'ı sızdırır ve gelecek majör sürümde kaldırılacaktır.")]
     public IReadOnlyList<CameraWorker> Cameras => _supervisor.Workers;
 
     /// <summary>CPUID/mimari özeti (AVX yoksa performans uyarısı loglanır).</summary>

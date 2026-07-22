@@ -13,7 +13,7 @@ namespace Anpr.Sdk.Workers;
 /// -> çok kareli onay (PlateConfirmer) -> geçerli, onaylı ve YENİ ise olay yayınla.
 /// Her worker kendi AnprEngine, frame source ve confirmer'ına sahiptir.
 /// </summary>
-public sealed class CameraWorker : IAsyncDisposable
+public sealed class CameraWorker : IAsyncDisposable, ICameraStatus
 {
     private readonly CameraOptions _camera;
     private readonly AnprServiceOptions _options;
