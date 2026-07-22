@@ -129,7 +129,7 @@ Fps üst-sınırı yok/IdleFps>Fps (`CameraWorker.cs:143`).
 | Plakasız araç | ⛔ BOŞLUK | Okunamayan araç için olay üretilmiyor (`CameraWorker.cs:223`) — operatör-onay tetiği yok |
 | İki-satırlı plaka (moto arka/ticari) | ⛔ BOŞLUK | Normalizer tek-satır 7-8 karakter varsayar (`TurkishPlateNormalizer.cs:69`) |
 | Kuyruk / aynı karede çok araç | ⛔ BOŞLUK | Hedef-araç seçimi yok (M3); üstelik ikinci araç bastırılabilir (H1) — **çift risk** |
-| Hızlı araç / az-kare | 🟡 KISMİ | Settle yolu oylamasız tek okuma + 3s gecikme (`PlateConfirmer.cs:194`) — bariyer için geç+riskli; füzyon kapalı |
+| Hızlı araç / az-kare | 🟡 KISMİ→İYİLEŞTİ | ÖLÇÜLDÜ (docs/2026-07-22): ≥2 kare zaten anında emit; 1-kare settle gecikmesi 3s→**2s** (ölçülmüş sıfır-maliyet). fps↑ NET-NEGATİF (uygulanmadı). 0-kare/OCR-limitli kaçanlar → KnownPlates snap (bekliyor) + veri, fps değil |
 | Siyah protokol plaka | 🟡 HAZIR | Whitelist snap +27pp doğrulandı ama KnownPlates listesi bekleniyor (kullanıcı) |
 | Çapraz-kamera aynı araç | 🟡 KISMİ | İçerik-bazlı çift-emit koruması yok (`CameraWorker.cs:46`); giriş+çıkış aynı bariyerde mükerrer |
 | Bariyer karar gecikmesi | 🟡 KISMİ | Settle/confirm beklerken araç geçebilir; erken-emit güven-eşiği ayarı var ama ölçülmedi |

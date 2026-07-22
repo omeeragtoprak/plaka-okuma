@@ -75,10 +75,12 @@ public sealed class AnprServiceOptions
     public int MinConfirmations { get; set; } = 2;
 
     /// <summary>
-    /// Onaya ulaşmayan araç, son görülmesinden bu kadar saniye sonra yine de yayınlanır
-    /// (tek karede geçen aracı kaçırmamak için).
+    /// Onaya ulaşmayan (tek-kare hızlı) araç, son görülmesinden bu kadar saniye sonra yine de yayınlanır.
+    /// YALNIZ 1-kare izleri etkiler (2+ kare zaten onayla ANINDA emit) → hızlı-araç bariyer gecikmesi.
+    /// Ölçüm (diag4, 26 araç, iki kamera): settle 1..3s emit sonucunu DEĞİŞTİRMİYOR (saf zamanlama knob'u).
+    /// 2 = hızlı araçta 3s yerine 2s bariyer + geç gelen 2. kareye 2s tolerans (konservatif).
     /// </summary>
-    public int SettleWindowSeconds { get; set; } = 3;
+    public int SettleWindowSeconds { get; set; } = 2;
 
     /// <summary>
     /// Karakter-bazlı çok-kareli oylama. Açıksa aynı aracın tüm karelerinde slot-bazlı olasılıklar
