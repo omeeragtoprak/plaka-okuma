@@ -61,6 +61,12 @@ public sealed class AnprRuntime : IAsyncDisposable
         var lf = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = lf.CreateLogger<AnprRuntime>();
         _maskPlates = options.MaskPlatesInLogs;   // KVKK: handler-istisna log'unda plakayı maskele (M8)
+
+        // M7: sunucu-only alanlar SDK boru hattında UYGULANMAZ (yalnız Anpr.Service paneli okur). PMS
+        // WebhookUrl set edip sessizce hiç POST gelmemesindense açık uyarı alsın (no-silent-ignore).
+        if (!string.IsNullOrWhiteSpace(options.WebhookUrl))
+            _logger.LogWarning("WebhookUrl DLL gömülümünde YOK SAYILIR (yalnız Anpr.Service paneli kullanır). " +
+                "Olayları almak için PlateDetected'e abone olun ya da extraSinks (IEventSink) geçin.");
         FrequentPlates = new FrequentPlateRegistry
         {
             KnownPlates = FrequentPlateRegistry.NormalizeKnownPlates(options.KnownPlates),

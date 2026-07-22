@@ -278,8 +278,9 @@ public sealed class AnprServiceOptions
     /// <summary>/events/recent için bellekte tutulacak maksimum olay sayısı.</summary>
     public int RecentEventsCapacity { get; set; } = 200;
 
-    /// <summary>Opsiyonel webhook: doluysa her roi olayı bu URL'e POST edilir (kayıt kanalı:
-    /// başarısızlıkta disk kuyruğuna yazılır ve 2 dk'da bir sırayla yeniden denenir — olay kaybolmaz).</summary>
+    /// <summary>Webhook URL — YALNIZ Anpr.Service paneli kullanır (doluysa her roi olayı bu URL'e POST
+    /// edilir, disk-kuyruk + retry ile). **DLL/AnprRuntime gömülümünde YOK SAYILIR** — PMS olayları
+    /// PlateDetected olayından ya da extraSinks (IEventSink) ile alır. Set edilirse AnprRuntime uyarır.</summary>
     public string? WebhookUrl { get; set; }
 
     /// <summary>Webhook doluysa bu aralıkta sağlık kalp-atışı POST edilir (kamera durumu, sayaçlar). 0 = kapalı.</summary>

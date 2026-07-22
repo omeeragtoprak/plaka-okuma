@@ -43,6 +43,41 @@ public sealed partial class CameraRecordPoller : BackgroundService
         catch { /* disk hatası kaydı düşürmesin */ }
     }
 
+    // KVKK saklama (M9): events.jsonl/evidence gibi camera-records.jsonl de EventRetentionDays'ten eski
+    // plaka PII'sini açılışta budar (sınırsız birikme bitti). Atomik temp+move (çökme-güvenli). Açılışta
+    // çağrılır → henüz poll/append yok; yine de _persistLock alınır. 0/negatif = sınırsız (davranış değişmez).
+    // NOT: corrections.jsonl (denetim izi, daha uzun yasal saklama) + dataset-corrections/ (fine-tune verisi)
+    // KASITLI dışarıda — bunlar ayrı bir saklama-politikası kararı gerektirir.
+    private void PruneCameraRecords()
+    {
+        int days = _options.EventRetentionDays;
+        if (days <= 0) return;
+        string path = Path.Combine(AppContext.BaseDirectory, "camera-records.jsonl");
+        try
+        {
+            if (!File.Exists(path)) return;
+            var cutoff = DateTimeOffset.Now.AddDays(-days);
+            var kept = new List<string>();
+            foreach (var line in File.ReadLines(path))
+            {
+                try
+                {
+                    var e = System.Text.Json.JsonSerializer.Deserialize<CamEvent>(line);
+                    if (e != null && DateTimeOffset.TryParse(e.TimeIso, out var t) && t >= cutoff) kept.Add(line);
+                }
+                catch { /* bozuk satır atlanır */ }
+            }
+            lock (_persistLock)
+            {
+                var tmp = path + ".tmp";
+                File.WriteAllLines(tmp, kept);
+                File.Move(tmp, path, overwrite: true);
+            }
+            _logger.LogInformation("camera-records KVKK budama: {N} kayıt tutuldu ({Days} günden eski atıldı)", kept.Count, days);
+        }
+        catch { /* bozuk dosya: dokunma */ }
+    }
+
     private void Remember(CamEvent e)
     {
         var q = _recent.GetOrAdd(e.CameraId, _ => new ConcurrentQueue<CamEvent>());
@@ -59,6 +94,7 @@ public sealed partial class CameraRecordPoller : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        PruneCameraRecords();   // M9: açılışta KVKK budama (events.jsonl deseniyle)
         var cams = _options.Cameras.Where(c => !string.IsNullOrWhiteSpace(c.Ip)).ToList();
         if (cams.Count == 0) { _logger.LogInformation("panel poller: IP'li kamera yok, kapalı"); return; }
 
