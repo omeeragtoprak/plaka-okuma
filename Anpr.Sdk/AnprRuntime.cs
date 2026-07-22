@@ -29,6 +29,7 @@ public sealed class AnprRuntime : IAsyncDisposable
 {
     private readonly AnprCameraSupervisor _supervisor;
     private readonly ILogger _logger;
+    private readonly bool _maskPlates;
     private bool _started;
     private bool _disposed;
 
@@ -59,6 +60,7 @@ public sealed class AnprRuntime : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         var lf = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = lf.CreateLogger<AnprRuntime>();
+        _maskPlates = options.MaskPlatesInLogs;   // KVKK: handler-istisna log'unda plakayı maskele (M8)
         FrequentPlates = new FrequentPlateRegistry
         {
             KnownPlates = FrequentPlateRegistry.NormalizeKnownPlates(options.KnownPlates),
@@ -95,7 +97,8 @@ public sealed class AnprRuntime : IAsyncDisposable
         catch (Exception ex)
         {
             // Tüketici istisnası boru hattını (worker döngüsünü) DÜŞÜRMEMELİ.
-            _logger.LogWarning(ex, "PlateDetected işleyicisi istisna fırlattı ({Plate})", e.PlateCompact);
+            _logger.LogWarning(ex, "PlateDetected işleyicisi istisna fırlattı ({Plate})",
+                Events.ConsoleEventSink.MaskIf(_maskPlates, e.PlateCompact));
         }
     }
 

@@ -23,6 +23,10 @@ public sealed class ConsoleEventSink : IEventSink
         return c.Length <= 5 ? c : $"{c[..2]}***{c[^3..]}";
     }
 
+    /// <summary>KVKK: mask=true ise plakayı maskeler, değilse aynen döner. Tek maskeleme kaynağı —
+    /// worker/runtime log yolları buradan geçer (M8).</summary>
+    internal static string MaskIf(bool mask, string plate) => mask ? Mask(plate) : plate;
+
     public Task PublishAsync(PlateEvent e, CancellationToken cancellationToken)
     {
         string plate = _mask ? Mask(e.Plate) : e.Plate;

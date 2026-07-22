@@ -351,7 +351,7 @@ public sealed class CameraWorker : IAsyncDisposable
             if (fused.OcrConfidence <= best.OcrConfidence) return null;
 
             _logger.LogInformation("[{Cam}] füzyon: '{Old}' (ocr={OldC:P0}) -> '{New}' (ocr={NewC:P0}, {N} kare)",
-                _camera.Id, best.Text, best.OcrConfidence, fused.Text, fused.OcrConfidence, bucket.Crops.Count);
+                _camera.Id, M(best.Text), best.OcrConfidence, M(fused.Text), fused.OcrConfidence, bucket.Crops.Count);
 
             return best with
             {
@@ -481,7 +481,7 @@ public sealed class CameraWorker : IAsyncDisposable
             && trend >= 0 && trend < _options.ApproachDepartRatio)
         {
             _logger.LogInformation("[{Cam}] uzaklaşan araç bastırıldı: '{Plate}' (genişlik-eğilimi {Trend:F2} < {Th:F2})",
-                _camera.Id, best.Text, trend, _options.ApproachDepartRatio);
+                _camera.Id, M(best.Text), trend, _options.ApproachDepartRatio);
             return;
         }
 
@@ -507,7 +507,7 @@ public sealed class CameraWorker : IAsyncDisposable
                 if (tr.IsValid)
                 {
                     _logger.LogInformation("[{Cam}] plaka snap: '{Old}' -> '{New}' (bilinen/müdavim, lev≤{Lev})",
-                        _camera.Id, best.Text, tr.Normalized, _options.SnapMaxLev);
+                        _camera.Id, M(best.Text), M(tr.Normalized!), _options.SnapMaxLev);
                     // Aday listesini tutarlı tut: düzeltilmiş plakayı başa koy (olayın Plate'i ile aday[0] eşleşsin).
                     var cands = new List<PlateCandidate> { new(tr.Compact!, best.OcrConfidence) };
                     if (best.Candidates != null)
@@ -551,7 +551,7 @@ public sealed class CameraWorker : IAsyncDisposable
                 if (dup)
                 {
                     _logger.LogInformation("[{Cam}] varyant bastırıldı: '{New}' (ocr={NewC:P0}) ~ önceki emit '{Old}' ({Ago:F0} sn önce)",
-                        _camera.Id, best.Text, best.OcrConfidence, r.Compact, (now - r.At).TotalSeconds);
+                        _camera.Id, M(best.Text), best.OcrConfidence, M(r.Compact), (now - r.At).TotalSeconds);
                     return;
                 }
             }
@@ -609,6 +609,9 @@ public sealed class CameraWorker : IAsyncDisposable
             if (char.IsLetterOrDigit(c)) buf[n++] = c;
         return new string(buf[..n]);
     }
+
+    // KVKK: MaskPlatesInLogs açıksa log'a giden plakayı maskeler (M8). Tek kaynak = ConsoleEventSink.Mask.
+    private string M(string plate) => Events.ConsoleEventSink.MaskIf(_options.MaskPlatesInLogs, plate);
 
     public async ValueTask DisposeAsync()
     {
