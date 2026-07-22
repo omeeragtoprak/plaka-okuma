@@ -7,6 +7,10 @@ namespace Anpr.Sdk.Events;
 /// </summary>
 public sealed record PlateEvent
 {
+    /// <summary>Olay şeması sürümü (M5). Alan eklenince/anlamı değişince artırılır; webhook + events.jsonl
+    /// tüketicileri (PMS) SESSİZ kırılma yerine sürümü kontrol edip uyum sağlayabilir. Mevcut şema = 1.</summary>
+    public int SchemaVersion { get; init; } = 1;
+
     public required DateTimeOffset Timestamp { get; init; }
     public required string CameraId { get; init; }
     public required string CameraName { get; init; }
