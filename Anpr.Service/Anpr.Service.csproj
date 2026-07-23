@@ -15,6 +15,14 @@
     <ProjectReference Include="..\Anpr.Sdk\Anpr.Sdk.csproj" />
   </ItemGroup>
 
+  <!-- H5/H6: Windows servis barındırma (SCM auto-start + çökme-restart) + rolling DOSYA log
+       (Windows serviste console hiçbir yere gitmez → saha teşhisi için dosyaya yaz). Her ikisi de
+       non-Windows'ta zararsız (UseWindowsService no-op; dosya-log her yerde çalışır). -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
+  </ItemGroup>
+
   <!-- Copy the shared ONNX models + configs into the service output so the
        default relative model paths in appsettings resolve at runtime. -->
   <ItemGroup>

@@ -6,8 +6,21 @@ using Anpr.Service.Panel;
 using Anpr.Service.Events;
 using Anpr.Sdk.Events;
 using Anpr.Sdk.Workers;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// H6: Windows servis barındırma (SCM auto-start + çökme-restart). Non-Windows'ta no-op (Mac'te console).
+builder.Host.UseWindowsService();
+
+// H5: console'a EK olarak rolling DOSYA log — Windows serviste console hiçbir yere gitmez, saha teşhisi
+// için gün-bazlı dosya (logs/anpr-YYYYMMDD.log, 14 gün saklama). shared:true çoklu-süreç-güvenli.
+builder.Host.UseSerilog((ctx, cfg) => cfg
+    .ReadFrom.Configuration(ctx.Configuration)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.File(Path.Combine(AppContext.BaseDirectory, "logs", "anpr-.log"),
+        rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14, shared: true));
 
 // --- Yapılandırma ---
 builder.Services.Configure<AnprServiceOptions>(
