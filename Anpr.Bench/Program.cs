@@ -424,14 +424,24 @@ void RunEmitSim(string framesDir, BenchOptions o)
     var emitted = new List<string>();
     var details = new List<string>(); // görsel doğrulama için: hangi saniyede, hangi kutuda
     var lastSeen = new Dictionary<string, double>(); // plaka -> son GÖRÜLME saniyesi (emit anı değil!)
+    // KnownPlates snap (pipeline-seviyesi ölçüm): whitelist yüklüyse ve OCR güveni SnapGate altındaysa
+    // emit edilen plaka bilinen plakaya lev≤1 düzeltilir (CameraWorker'daki üretim davranışının aynısı).
+    var snapList = o.SnapFile != null && File.Exists(o.SnapFile)
+        ? (System.Text.Json.JsonSerializer.Deserialize<List<string>>(File.ReadAllText(o.SnapFile)) ?? new())
+            .Select(Norm).Where(p => p.Length >= 5).Distinct().ToList()
+        : new List<string>();
+    var snapSet = new HashSet<string>(snapList);
+    if (snapList.Count > 0) Console.WriteLine($"[snap AÇIK: {snapList.Count} bilinen plaka, gate<{o.SnapGate}]");
     void Drain(DateTimeOffset now)
     {
         foreach (var b in confirmer.DrainReady(now))
             if (b.OcrConfidence >= o.EmitFloor)
             {
-                emitted.Add(Norm(b.Text));
-                double seenSec = lastSeen.TryGetValue(Norm(b.Text), out var s) ? s : (now - epoch).TotalSeconds;
-                details.Add($"EMIT sec={seenSec:F1} plate={Norm(b.Text)} ocr={b.OcrConfidence:F2} box={b.Box.X},{b.Box.Y},{b.Box.Width},{b.Box.Height}");
+                string pc = Norm(b.Text);
+                if (snapList.Count > 0 && b.OcrConfidence < o.SnapGate) pc = Snap(pc, snapSet, snapList);
+                emitted.Add(pc);
+                double seenSec = lastSeen.TryGetValue(pc, out var s) ? s : (now - epoch).TotalSeconds;
+                details.Add($"EMIT sec={seenSec:F1} plate={pc} ocr={b.OcrConfidence:F2} box={b.Box.X},{b.Box.Y},{b.Box.Width},{b.Box.Height}");
             }
     }
     for (int i = 0; i < frames.Length; i += step)
@@ -674,6 +684,33 @@ static void SaveCrop(Appearance a, string outPath)
 
 static string Norm(string s) => new string((s ?? "").Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
 
+// KnownPlates snap (C#-birebir: min lev≤1'deki İLK aday) — pipeline-seviyesi snap ölçümü için.
+static string Snap(string c, HashSet<string> set, IReadOnlyList<string> list)
+{
+    if (set.Contains(c)) return c;
+    string best = c; int bl = 2;
+    foreach (var w in list) { int d = BLev(c, w, 1); if (d < bl) { bl = d; best = w; } }
+    return best;
+}
+static int BLev(string a, string b, int max)
+{
+    if (Math.Abs(a.Length - b.Length) > max) return max + 1;
+    var dp = new int[b.Length + 1];
+    for (int j = 0; j <= b.Length; j++) dp[j] = j;
+    for (int i = 1; i <= a.Length; i++)
+    {
+        int prev = dp[0]; dp[0] = i; int rmin = dp[0];
+        for (int j = 1; j <= b.Length; j++)
+        {
+            int cur = dp[j];
+            dp[j] = Math.Min(Math.Min(dp[j] + 1, dp[j - 1] + 1), prev + (a[i - 1] == b[j - 1] ? 0 : 1));
+            prev = cur; if (dp[j] < rmin) rmin = dp[j];
+        }
+        if (rmin > max) return max + 1;
+    }
+    return dp[b.Length];
+}
+
 static double CharSim(string a, string b)
 {
     if (a.Length == 0 && b.Length == 0) return 1;
@@ -726,6 +763,8 @@ BenchOptions ParseArgs(string[] a)
         Degrade = int.Parse(ArgVal(a, "--degrade") ?? "0"),
         FusionMax = int.Parse(ArgVal(a, "--fusionmax") ?? "5"),
         OutDir = ArgVal(a, "--out"),
+        SnapFile = ArgVal(a, "--snap"),
+        SnapGate = float.Parse(ArgVal(a, "--snapgate") ?? "1.01", CultureInfo.InvariantCulture),
         Tag = ArgVal(a, "--label") ?? "cfg",
     };
 }
@@ -768,6 +807,8 @@ sealed class BenchOptions
     public float EmitFloor = 0;
     public int Degrade = 0;
     public int FusionMax = 5;
+    public string? SnapFile;        // KnownPlates whitelist (JSON compact dizisi) — pipeline snap ölçümü
+    public float SnapGate = 1.01f;  // SnapMaxOcrConfidence: bu güvenin ALTINDA snap uygulanır
     public string? OutDir;
     public string Tag = "cfg";
 }

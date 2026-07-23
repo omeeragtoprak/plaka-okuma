@@ -117,7 +117,7 @@ def load_poll_truth(poll_file, t0_ep, t1_ep, offset, pad=90):
         pass
     return set(inwin.keys())
 
-def run_emitsim(root, cam_dir, ocr, fps, fuzzy, minconfirm, det=None, minwidth=0.0, dedup=8.0, earlyemit=0.0, roi="", spatialiou=0.0, skipchar=0.0, qblur=0.0, qdark=1.0, qbright=1.0):
+def run_emitsim(root, cam_dir, ocr, fps, fuzzy, minconfirm, det=None, minwidth=0.0, dedup=8.0, earlyemit=0.0, roi="", spatialiou=0.0, skipchar=0.0, qblur=0.0, qdark=1.0, qbright=1.0, snap=None, snapgate=1.01):
     cmd = ["dotnet", "run", "-c", "Release", "--no-build", "--project", "Anpr.Bench", "--",
            "emitsim", cam_dir, "--ocr", ocr, "--fps", str(fps), "--minconfirm", str(minconfirm),
            "--minocr", "0.45", "--emitfloor", "0.45", "--fuzzy", str(fuzzy)]
@@ -131,6 +131,8 @@ def run_emitsim(root, cam_dir, ocr, fps, fuzzy, minconfirm, det=None, minwidth=0
     if qdark < 1: cmd += ["--qdark", str(qdark)]
     if qbright < 1: cmd += ["--qbright", str(qbright)]
     if roi: cmd += ["--roi", roi]
+    if snap:
+        cmd += ["--snap", snap, "--snapgate", str(snapgate)]
     out = subprocess.run(cmd, cwd=root, capture_output=True, text=True).stdout
     m = re.search(r'DISTINCT plaka=\d+\s*\n\s*(.+)', out)
     plates = set()
@@ -172,6 +174,8 @@ def main():
     ap.add_argument("--qbright", type=float, default=1.0)
     ap.add_argument("--roi", default="", help="ROI çokgeni (tek kamera koşusunda)")
     ap.add_argument("--fps-list", default="2")
+    ap.add_argument("--snap", default=None)
+    ap.add_argument("--snapgate", type=float, default=1.01)
     ap.add_argument("--fuzzy", type=int, default=1); ap.add_argument("--minconfirm", type=int, default=2)
     ap.add_argument("--poll-dir", default=None, help="verilirse truth poll_<label>.raw'dan yüklenir (TAM gerçek-değer)")
     ap.add_argument("--frames-root", default="dataset/diag3", help="emitsim kare kökü (örn dataset/diag4)")
@@ -202,7 +206,7 @@ def main():
         tot_exact = tot_near = tot_missed = tot_extra = tot_truth = 0
         for ip, label in cams:
             cam_dir = f"{a.frames_root}/{label}"
-            ours = run_emitsim(a.root, cam_dir, a.ocr, fps, a.fuzzy, a.minconfirm, a.det, a.minwidth, a.dedup, a.earlyemit, a.roi, a.spatialiou, a.skipchar, a.qblur, a.qdark, a.qbright)
+            ours = run_emitsim(a.root, cam_dir, a.ocr, fps, a.fuzzy, a.minconfirm, a.det, a.minwidth, a.dedup, a.earlyemit, a.roi, a.spatialiou, a.skipchar, a.qblur, a.qdark, a.qbright, a.snap, a.snapgate)
             ex, near, missed, extra = compare(ours, truth[label])
             T = len(truth[label])
             det = len(ex) + len(near)   # yakalanan (exact + 1-karakter)
