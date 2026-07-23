@@ -19,10 +19,12 @@ if (giris is null && cikis is null)
 
 var options = new AnprServiceOptions();   // üretimde doğrulanmış varsayılanlar (çoğu senaryoda yeterli)
 
-// Siyah resmi/protokol plaka düzeltme (isteğe bağlı, offline +27pp doğrulandı): sitenizin bilinen
-// resmi araç plakalarını girin; okuma bunlara lev≤SnapMaxLev yakınsa otomatik düzeltilir.
-// options.KnownPlates.AddRange(new[] { "25 LT 424", "25 TGG 001" });
-// options.SnapMaxLev = 1;   // 1 = güvenli (0 yanlış-snap ölçüldü)
+// Doğruluk: sitenin bilinen araçlarını verin → sistematik yanlış-okumalar bilinen plakaya lev≤1
+// düzeltilir (ör. bir karede 25 ADM 032 -> 25 AUM 032 okunursa geri düzelir). Ölçüldü: +9.3pp,
+// %0.16 yanlış-snap. Listeyi veriden üretin: scripts/harvest_knownplates.py (kamera+kendi okumalar).
+// options.KnownPlates.AddRange(new[] { "25 ADM 032", "25 TGG 001" });
+// options.SnapMaxLev = 1;                 // lev≤1 (lev≤2 bariyer için fazla yanlış-snap ölçüldü)
+// options.SnapMaxOcrConfidence = 0.99f;   // varsayılan; model ≥0.99 okumaları korunur
 
 if (giris != null) options.Cameras.Add(new CameraOptions { Id = "giris", Name = "Giriş", RtspUrl = giris });
 if (cikis != null) options.Cameras.Add(new CameraOptions { Id = "cikis", Name = "Çıkış", RtspUrl = cikis });

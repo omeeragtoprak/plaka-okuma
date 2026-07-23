@@ -44,6 +44,22 @@ await runtime.StopAsync();
 `LowConfidence` (operatör onayı bayrağı), `Candidates` (top-K aday), `Scope` (`roi`/`gozlem`),
 `EvidencePath` (plaka kırpıntısı), `FramePath` (tam kare — araç görünür).
 
+## Doğruluk artırma: KnownPlates (sitenin bilinen araçları)
+Otoparkta düzenli araçlar (abone/personel/protokol) baskındır. Bu plakaları `KnownPlates`'e verirseniz,
+sistematik yanlış-okumalar (ör. bir kare `25 ADM 032` yerine `25 AUM 032` okunursa) bilinen plakaya
+otomatik düzeltilir (lev≤1). **Ölçüldü: +9.3pp** (site verisinde), `%0.16` yanlış-snap.
+
+```csharp
+var options = new AnprServiceOptions {
+    Cameras = { /* … */ },
+    KnownPlates = { "25 ADM 032", "25 TGG 001", /* sitenizin düzenli araçları */ },
+    SnapMaxLev = 1,               // lev≤1 (lev≤2 ölçüldü: bariyer için fazla yanlış-snap)
+    SnapMaxOcrConfidence = 0.99f, // varsayılan; ≥0.99 güvenli okumalar korunur, altındakiler düzeltilir
+};
+```
+Listeyi elle bakmak yerine **veriden üretebilirsiniz**: kameranın kendi ANPR kayıtları + kendi
+olaylarınızın ÇAPRAZ-agreement'ı (bkz. `scripts/harvest_knownplates.py`) — filo değiştikçe yeniden çalıştırın.
+
 ## Notlar
 - Web/panel bu pakette YOKTUR (yalnız motor + orkestrasyon). Canlı izleme paneli ayrı serviste kalır.
 - Kameralara yalnız salt-okuma RTSP erişimi gerekir; kamera ayarları değiştirilmez.
