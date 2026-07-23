@@ -447,6 +447,25 @@ public sealed class CameraWorker : IAsyncDisposable, ICameraStatus
         }
     }
 
+    // Varyant-bastırma kararı (saf/test-edilebilir). Yeni okuma, yakın bir önceki emitin AYNI geçişinin
+    // hayalet varyantı mı? H1 DÜZELTMESİ: aday-eşleşmesi artık güven-korumalı — model ≥0.99 okuduğunda
+    // GERÇEK farklı araç sayılır (kuyrukta 2. araç bastırılmaz), <0.99 belirsiz eşleşme hayalet sayılır.
+    // Kural 2 (düşük-güven yakın-varyant) ve Kural D (müdavim varyantı) zaten güven-korumalıydı.
+    internal static bool IsVariantOfRecentEmit(
+        string compact, HashSet<string> candSet, float ocrConf, bool isFrequent,
+        string recentCompact, HashSet<string> recentCandidates, float recentOcrConf, bool recentIsFrequent,
+        float manualReviewMinOcr)
+    {
+        if (recentCompact == compact) return true;                                   // aynı plaka tekrar-emit → dedup
+        bool candMatch = recentCandidates.Contains(compact) || candSet.Contains(recentCompact);
+        if (candMatch && ocrConf < 0.99f) return true;                               // H1: yalnız belirsiz aday-eşleşmesi
+        if (ocrConf < manualReviewMinOcr && recentOcrConf >= 0.9f && Levenshtein(compact, recentCompact) <= 2)
+            return true;                                                             // Kural 2
+        if (ocrConf < 0.95f && !isFrequent && recentIsFrequent && Levenshtein(compact, recentCompact) <= 2)
+            return true;                                                             // Kural D — müdavim varyantı
+        return false;
+    }
+
     private static int Levenshtein(string a, string b)
     {
         if (a == b) return 0;
@@ -534,21 +553,8 @@ public sealed class CameraWorker : IAsyncDisposable, ICameraStatus
             foreach (var r in _recentEmits)
             {
                 if (r.Scope != scope) continue;
-                bool dup = r.Compact == compact || r.Candidates.Contains(compact) || candSet.Contains(r.Compact);
-                // Düşük güvenli yakın-varyant: eşik altı yeni okuma, az önceki YÜKSEK güvenli emitin
-                // ≤2 harf komşusuysa aynı geçişin bozuk kuyruğudur (25AEA791→25AEA181 vakası).
-                // Gerçek ikinci araç EarlyEmit sayesinde ya ≥eşik okunur ya bu düşük-güven yoluna düşmez.
-                if (!dup && best.OcrConfidence < _options.ManualReviewMinOcr && r.OcrConf >= 0.9f
-                    && Levenshtein(compact, r.Compact) <= 2)
-                    dup = true;
-                // Kural D — müdavim varyantı: az önce emit edilen plaka MÜDAVİMSE (defalarca ≥0.98
-                // görülmüş), yeni emit müdavim DEĞİLSE, yakın-varyantsa (lev≤2) ve güveni <0.95 ise
-                // bu aynı geçişin yanlış-okumasıdır (25FZ069→25FZ289 vakası). Gerçek ikinci araç ya
-                // kendisi müdavimdir ya da ≥0.95 okunur.
-                if (!dup && best.OcrConfidence < 0.95f && !_frequent.IsFrequent(compact)
-                    && _frequent.IsFrequent(r.Compact) && Levenshtein(compact, r.Compact) <= 2)
-                    dup = true;
-                if (dup)
+                if (IsVariantOfRecentEmit(compact, candSet, best.OcrConfidence, _frequent.IsFrequent(compact),
+                        r.Compact, r.Candidates, r.OcrConf, _frequent.IsFrequent(r.Compact), _options.ManualReviewMinOcr))
                 {
                     _logger.LogInformation("[{Cam}] varyant bastırıldı: '{New}' (ocr={NewC:P0}) ~ önceki emit '{Old}' ({Ago:F0} sn önce)",
                         _camera.Id, M(best.Text), best.OcrConfidence, M(r.Compact), (now - r.At).TotalSeconds);
