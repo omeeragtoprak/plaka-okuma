@@ -39,6 +39,13 @@ await runtime.StartAsync();
 await runtime.StopAsync();
 ```
 
+## `PlateDetected` kontratı (önemli)
+İşleyici, kamera worker **döngü thread'inde SENKRON** ve birden çok kameradan **EŞZAMANLI** çağrılır:
+- İşleyiciniz **thread-safe/reentrant** olmalı (paylaşılan durumu kilitleyin).
+- İşleyici **HIZLI dönmeli** — uzun iş (bariyer I/O, DB, ağ) işleyicide DEĞİL, kendi kuyruğunuzda asenkron.
+  Bloklayan işleyici boru hattını durdurur ve **kare düşürür** (araç kaçırılır).
+- İşleyicideki istisnalar yutulur+loglanır (boru hattı düşmez).
+
 ## Olay sözleşmesi (`PlateEvent`)
 `EventId` (idempotency), `Plate` / `PlateCompact`, `Confidence` / `OcrConfidence`,
 `LowConfidence` (operatör onayı bayrağı), `Candidates` (top-K aday), `Scope` (`roi`/`gozlem`),

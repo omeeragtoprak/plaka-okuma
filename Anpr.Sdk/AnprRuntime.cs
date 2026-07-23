@@ -35,7 +35,16 @@ public sealed class AnprRuntime : IAsyncDisposable
 
     /// <summary>
     /// Her yayınlanan plaka olayında tetiklenir (hem Scope="roi" hem "gozlem" — tüketici filtreler).
-    /// Worker döngü thread'lerinden çağrılır; UI güncellemeleri kendi context'inize marshal edin.
+    /// <para><b>KONTRAT (önemli):</b></para>
+    /// <list type="bullet">
+    /// <item>İşleyici, kamera worker DÖNGÜ THREAD'inde SENKRON çalışır ve birden çok kameradan
+    /// EŞZAMANLI çağrılabilir → işleyiciniz <b>thread-safe/reentrant</b> olmalı (paylaşılan durumu kilitleyin).</item>
+    /// <item>İşleyici <b>HIZLI dönmeli</b>. Uzun iş (bariyer I/O, DB yazımı, ağ) işleyicide YAPILMAMALI —
+    /// KENDİ kuyruğunuza atıp asenkron işleyin. Bloklayan işleyici boru hattını durdurur ve kare düşürür
+    /// (araç kaçırılır).</item>
+    /// <item>İşleyicideki istisnalar yutulur ve loglanır (boru hattı düşmez).</item>
+    /// <item>UI güncellemeleri kendi senkronizasyon context'inize marshal edin.</item>
+    /// </list>
     /// </summary>
     public event Action<PlateEvent>? PlateDetected;
 
