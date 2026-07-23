@@ -193,10 +193,12 @@ public sealed class AnprServiceOptions
     public bool SnapToFrequent { get; set; } = false;
 
     /// <summary>Güven-kapısı: yalnız OCR güveni bu değerin ALTINDA olan okumayı snap et. Yüksek-güvenli
-    /// bir okuma whitelist plakasına yakın olsa bile GERÇEK farklı bir plaka olabilir (yanlış-snap riski);
-    /// bunu düşürmek (ör. 0.90) yüksek-güvenli okumaları korur. 1.0 = kapı yok (offline lev≤1'de 0
-    /// yanlış-snap ölçüldü — varsayılan). Daha büyük whitelist/lev≤2 için düşürmek güvenli olur.</summary>
-    public float SnapMaxOcrConfidence { get; set; } = 1.0f;
+    /// bir okuma whitelist plakasına yakın olsa bile GERÇEK farklı bir plaka olabilir (yanlış-snap riski).
+    /// **0.99 varsayılan (2026-07-23 gate-sweep optimum):** model ≥0.99 okumaları DOĞRU (snap'leme),
+    /// sistematik yanlış-okumalar <0.99'da; 0.99→1.0 uçurumu (395-plaka whitelist'te yanlış-snap 1→11).
+    /// val+night: 0.99 → +9.3pp, %0.16 yanlış-snap. Küçük manuel whitelist için 1.0 da güvenli olabilir
+    /// (az komşu) ama 0.99 her ölçekte güvenli. Daha düşürmek (0.90) yüksek-güvenli okumaları daha korur.</summary>
+    public float SnapMaxOcrConfidence { get; set; } = 0.99f;
 
     /// <summary>
     /// Emit-sonrası varyant bastırma penceresi (sn): yeni emitin plakası, aynı kameranın/kapsamın son
