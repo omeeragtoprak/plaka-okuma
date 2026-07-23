@@ -97,10 +97,10 @@ kritik 5 boşluk **bariyer davranışını ve saha teşhisini** etkiliyor, motor
 | M15 | ⚠️ | DLL modunda kamera bağlantı-durumu değişimi için olay/callback yok | `AnprRuntime.cs:47` | `CameraStatusChanged` olayı — PMS sessizce körleşmesin |
 | M16 | ⚠️ | PlateFuser hizalama referansı=crops[0], boyut referansı=en büyük (uyumsuz) | `PlateFuser.cs:28` | Hizalama+boyut referansını en büyük kırpıntıya birle |
 | M17 | ⚠️ | PlateRectifier2.Invert3x3 tekilliğe korumasız (kötü-koşullu homografide çöp) | `PlateRectifier2.cs:216` | det≈0 kontrolü → rektifikasyonu atla, ham kırpıntı |
-| M18 | ⚠️ | NuGet paketlerinde LICENSE metadata/dosya yok | `Anpr.Sdk.csproj:12` | PackageLicenseExpression + LICENSE; herkese açık pakette şart |
-| M19 | ⚠️ | Sevk DLL'de debug sembol/SourceLink yok — saha çökme yığını okunamaz | `publish.yml:49` | snupkg + SourceLink |
-| M20 | ⚠️ | Paket README'si ESKİ mimariyi (bağımsız webhook) gösteriyor | `docs/entegrasyon-kilavuzu.md:60` | DLL/AnprRuntime akışına güncelle |
-| M21 | ⚠️ | Sürüm iki csproj'de 0.9.0 sabit; Sdk→Core NuGet bağımlılığı pack sürümüne sabit | `Anpr.Sdk.csproj:13` | Tek `<Version>` (Directory.Build.props); SemVer + CI tag'i |
+| M18 | ⚠️ KULLANICI | NuGet paketlerinde LICENSE metadata/dosya yok | `Anpr.Sdk.csproj` | GERÇEK ama lisans SEÇİMİ kullanıcının (belediye IP'si) — MIT/Apache/tescilli? Karar verilince `PackageLicenseExpression`+LICENSE wire'lanır (public nuget'te şart) |
+| M19 | ✅ KAPANDI | Sevk DLL'de debug sembol/SourceLink yok — saha çökme yığını okunamaz | `Anpr.Sdk.csproj`+`Anpr.Core.csproj` | ✅ IncludeSymbols+snupkg+SourceLink.GitHub+EmbedUntrackedSources; pack .nupkg+.snupkg üretiyor (doğrulandı); CI push snupkg'i otomatik gönderir |
+| M20 | ❌ REJECT | Paket README'si ESKİ mimariyi gösteriyor | `docs/entegrasyon-kilavuzu.md` | ŞÜPHECİ: README + kılavuz ZATEN doğru — Seçenek A(sidecar/webhook)+B(DLL/AnprRuntime) ikisini de sunar, B birincil. 'Eski standalone-webhook' iddiası yanlış |
+| M21 | ❌ REJECT | Sürüm iki csproj'de 0.9.0 sabit | `publish.yml` | ŞÜPHECİ: CI sürümü TAG'den türetiyor (`GITHUB_REF_NAME#v`→`-p:Version=` her iki pack'e) → tag v1.0.0 paketi 1.0.0, sabit 0.9.0 ezilir; Sdk→Core aynı sürüm. Finding yanlış varsayım |
 
 ### LOW (özet — tam liste workflow çıktısında)
 > **Eşzamanlılık-hijyeni kapanışı (2026-07-22):** ✅ `_pendingPublishes` dispose-yarışı KAPANDI (flush loopStopped'a geçitlendi); ✅ FfmpegFrameSource `_lastFrameUtc` torn-read KAPANDI (atomik `long` ticks + Volatile). Şüpheci-doğrulama sonucu: `FrameMsPercentile` [25] İYİ-HUYLU (double eleman yazımı atomik, crash yok) → dokunulmadı; `LongRunning`-task micro-opt'u REDDEDİLDİ (LoopAsync async-await'te pool'u zaten bırakıyor, fayda ölçülemez). adversarial-reviewer NOT REFUTED (davranış korundu), 124 test.

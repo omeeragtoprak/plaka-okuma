@@ -13,6 +13,14 @@
     <PackageTags>anpr;plate-recognition;turkish-plates;onnx;cpu</PackageTags>
     <RepositoryUrl>https://github.com/omeeragtoprak/plaka-okuma</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+
+    <!-- Symbols + SourceLink (M19): sahadaki çökme yığınları kaynağa çözümlenebilsin (snupkg -> nuget.org
+         symbol server; PDB'ler + git kaynak-linkleri). Yalnız pack'i etkiler; build/test'e dokunmaz. -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>portable</DebugType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <!-- CPU-only ANPR core. Görüntü işleme: SkiaSharp (MIT lisanslı, ücretsiz; ticari/kamu
          kullanımına uygun) + ONNX Runtime (CPU). SkiaSharp temel paketi osx-arm64 ve win-x64
          native binary'lerini içerir; bu Mac'te de Windows hedefte de çalışır.
@@ -23,6 +31,7 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" />
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
     <PackageReference Include="YamlDotNet" Version="16.2.1" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
