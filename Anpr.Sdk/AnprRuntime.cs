@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Anpr.Sdk.Configuration;
 using Anpr.Sdk.Events;
 using Anpr.Sdk.Workers;
@@ -30,20 +31,26 @@ public sealed class AnprRuntime : IAsyncDisposable
     private readonly AnprCameraSupervisor _supervisor;
     private readonly ILogger _logger;
     private readonly bool _maskPlates;
+    private readonly Channel<PlateEvent> _eventChannel;   // M2: handler'ı boru hattından izole eden kuyruk
+    private readonly Task _dispatchTask;
+    private long _droppedEvents;
     private bool _started;
     private bool _disposed;
 
+    /// <summary>M2: PlateDetected kuyruğu dolduğu için düşürülen olay sayısı (işleyici çok yavaşsa artar;
+    /// sağlıklı entegrasyonda 0 kalır). PMS bunu izleyip yavaş işleyicisini tespit edebilir.</summary>
+    public long DroppedEvents => Interlocked.Read(ref _droppedEvents);
+
     /// <summary>
     /// Her yayınlanan plaka olayında tetiklenir (hem Scope="roi" hem "gozlem" — tüketici filtreler).
-    /// <para><b>KONTRAT (önemli):</b></para>
+    /// <para><b>KONTRAT (M2 — bounded-dispatcher ile izole):</b></para>
     /// <list type="bullet">
-    /// <item>İşleyici, kamera worker DÖNGÜ THREAD'inde SENKRON çalışır ve birden çok kameradan
-    /// EŞZAMANLI çağrılabilir → işleyiciniz <b>thread-safe/reentrant</b> olmalı (paylaşılan durumu kilitleyin).</item>
-    /// <item>İşleyici <b>HIZLI dönmeli</b>. Uzun iş (bariyer I/O, DB yazımı, ağ) işleyicide YAPILMAMALI —
-    /// KENDİ kuyruğunuza atıp asenkron işleyin. Bloklayan işleyici boru hattını durdurur ve kare düşürür
-    /// (araç kaçırılır).</item>
+    /// <item>İşleyici TEK bir iç dispatcher thread'inde <b>SERİLEŞMİŞ</b> çağrılır (eşzamanlı PlateDetected
+    /// yok) — böylece worker boru hattı yavaş işleyiciden ETKİLENMEZ (kare düşmez).</item>
+    /// <item>Yine de <b>makul hızlı dönün</b>: çok yavaş işleyici kuyruğu (256) doldurursa yeni olaylar
+    /// DÜŞER (<see cref="DroppedEvents"/> sayılır + uyarı loglanır). Uzun işi KENDİ kuyruğunuza atın.</item>
     /// <item>İşleyicideki istisnalar yutulur ve loglanır (boru hattı düşmez).</item>
-    /// <item>UI güncellemeleri kendi senkronizasyon context'inize marshal edin.</item>
+    /// <item>Kendi thread'lerinizden erişilen paylaşılan durumu kilitleyin; UI'yi kendi context'inize marshal edin.</item>
     /// </list>
     /// </summary>
     public event Action<PlateEvent>? PlateDetected;
@@ -87,7 +94,16 @@ public sealed class AnprRuntime : IAsyncDisposable
             KnownPlates = FrequentPlateRegistry.NormalizeKnownPlates(options.KnownPlates),
         };
 
-        var sinks = new List<IEventSink> { new DelegateEventSink(e => RaisePlateDetected(e)) };
+        // M2: PlateDetected'i bounded-channel + tek drain-task üzerinden yayınla. Worker'ın sink çağrısı
+        // (EnqueueEvent) anında döner (non-blocking write) → yavaş PMS işleyicisi boru hattını DURDURMAZ;
+        // dispatch tek thread'de serileşir (eşzamanlı çağrı yok). Kuyruk dolarsa (256) yeni olay düşer+sayılır.
+        // FullMode=Wait + TryWrite (bloklamayan): kuyruk doluysa TryWrite FALSE döner → yeni olayı say+at.
+        // (Drop* modlarında TryWrite drop etse bile true dönerdi → düşüş sayılamazdı.)
+        _eventChannel = Channel.CreateBounded<PlateEvent>(
+            new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
+        _dispatchTask = Task.Run(DispatchEventsAsync);
+
+        var sinks = new List<IEventSink> { new DelegateEventSink(EnqueueEvent) };
         if (extraSinks != null) sinks.AddRange(extraSinks);
 
         _supervisor = new AnprCameraSupervisor(
@@ -104,12 +120,43 @@ public sealed class AnprRuntime : IAsyncDisposable
         await _supervisor.StartAsync(cancellationToken);
     }
 
-    /// <summary>Okumayı durdurur, bekleyen olay yayınlarını (≤5 sn) boşaltır, kaynakları bırakır.</summary>
+    /// <summary>Okumayı durdurur, kuyruktaki bekleyen olayları işleyiciye boşaltır (≤5 sn), kaynakları bırakır.</summary>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         if (!_started || _disposed) return;
         _started = false;
-        await _supervisor.StopAsync(cancellationToken);
+        await _supervisor.StopAsync(cancellationToken);   // worker'lar durdu → yeni olay üretilmez
+        await DrainDispatcherAsync();                      // kuyruktaki son olaylar işleyiciye gitsin
+    }
+
+    // Kuyruğu kapatıp dispatcher'ın kalan olayları boşaltmasını bekler (≤5s). İdempotent (TryComplete +
+    // tamamlanmış task'i beklemek anındadır) → StopAsync ve DisposeAsync'ten güvenle çağrılır.
+    private async Task DrainDispatcherAsync()
+    {
+        _eventChannel.Writer.TryComplete();
+        try { await _dispatchTask.WaitAsync(TimeSpan.FromSeconds(5)); } catch { /* yoksay */ }
+    }
+
+    // M2: sink→kuyruk (non-blocking). Kuyruk doluysa (işleyici çok yavaş) yeni olay düşer + sayılır+uyarılır.
+    // internal: test dispatcher davranışını doğrudan doğrular (üretimde yalnız DelegateEventSink çağırır).
+    internal void EnqueueEvent(PlateEvent e)
+    {
+        if (_eventChannel.Writer.TryWrite(e)) return;
+        long n = Interlocked.Increment(ref _droppedEvents);
+        if (n % 50 == 1)   // spam önle: her 50 düşüşte bir uyar
+            _logger.LogWarning("PlateDetected kuyruğu dolu — işleyici çok yavaş; {N} olay düşürüldü. " +
+                "İşleyici HIZLI dönmeli (uzun işi kendi kuyruğunuza atın).", n);
+    }
+
+    // Tek-thread dispatch döngüsü: olayları SERİLEŞMİŞ olarak işleyiciye verir (eşzamanlı çağrı yok).
+    private async Task DispatchEventsAsync()
+    {
+        try
+        {
+            await foreach (var e in _eventChannel.Reader.ReadAllAsync())
+                RaisePlateDetected(e);
+        }
+        catch (Exception ex) { _logger.LogError(ex, "PlateDetected dispatcher döngüsü beklenmedik hata"); }
     }
 
     private void RaisePlateDetected(PlateEvent e)
@@ -127,6 +174,7 @@ public sealed class AnprRuntime : IAsyncDisposable
     {
         if (_disposed) return;
         await StopAsync();
+        await DrainDispatcherAsync();   // hiç StartAsync edilmediyse (StopAsync erken döner) dispatcher sızmasın
         _disposed = true;
     }
 

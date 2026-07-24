@@ -35,9 +35,9 @@ using var loggerFactory = LoggerFactory.Create(b => b.AddSimpleConsole(o => o.Si
 await using var runtime = new AnprRuntime(options, loggerFactory);
 
 int eventCount = 0;
-// KONTRAT: işleyici worker döngü thread'inde SENKRON + birden çok kameradan EŞZAMANLI çağrılır →
-// thread-safe olmalı VE HIZLI dönmeli (uzun iş = kendi kuyruğunuza atın; bloklarsanız boru hattı durur,
-// araç kaçırılır). Burada Interlocked + Console.WriteLine kullanıldı (ikisi de güvenli/hızlı).
+// KONTRAT (M2): işleyici TEK dispatcher thread'inde SERİLEŞMİŞ çağrılır (eşzamanlı yok) ve worker boru
+// hattını BLOKLAMAZ. Yine de makul hızlı dönün — çok yavaşsa kuyruk (256) dolar, olaylar DÜŞER
+// (runtime.DroppedEvents sayar). Uzun işi kendi kuyruğunuza atın. Burada Interlocked+Console (hızlı).
 runtime.PlateDetected += e =>
 {
     if (e.Scope != "roi") return;                       // "gozlem" (ROI dışı) okumalar bariyer kararına girmez
