@@ -75,7 +75,11 @@ public sealed class AnprRuntime : IAsyncDisposable
     /// <param name="options">Kamera listesi + eşikler. Üretimde doğrulanmış varsayılanlar geçerlidir;
     /// çoğu senaryoda yalnız <see cref="AnprServiceOptions.Cameras"/> doldurmak yeter.</param>
     /// <param name="loggerFactory">PMS'in log altyapısı (Serilog/NLog sağlayıcısı vb.). null = sessiz.</param>
-    /// <param name="extraSinks">Olayları ayrıca almak isteyen ek hedefler (ör. veritabanı sink'i).</param>
+    /// <param name="extraSinks">Ek olay hedefleri (IEventSink). <b>ZERO-LOSS/KALICI teslim için burayı
+    /// kullanın:</b> extraSink'ler her olay için awaited çağrılır (PlateDetected'in aksine DÜŞMEZ). Kalıcılık
+    /// PMS'in sorumluluğudur (SDK in-process olay verir; sizin DB'nizi bilmez) — DB/dosyaya yazan bir
+    /// IEventSink geçin (hızlı/async yazın; yavaş sink boru hattını yavaşlatır). PlateDetected ise dispatch'li
+    /// KOLAYLIK yoludur (yavaş işleyicide olay düşebilir).</param>
     public AnprRuntime(AnprServiceOptions options, ILoggerFactory? loggerFactory = null,
         IEnumerable<IEventSink>? extraSinks = null)
     {

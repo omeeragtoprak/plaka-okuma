@@ -67,6 +67,18 @@ var options = new AnprServiceOptions {
 Listeyi elle bakmak yerine **veriden üretebilirsiniz**: kameranın kendi ANPR kayıtları + kendi
 olaylarınızın ÇAPRAZ-agreement'ı (bkz. `scripts/harvest_knownplates.py`) — filo değiştikçe yeniden çalıştırın.
 
+## Kalıcılık / zero-loss (önemli)
+SDK **in-process** olay verir; kalıcılık **PMS'in sorumluluğudur** (SDK sizin DB'nizi bilmez, disk kuyruğu tutmaz):
+- **`PlateDetected`** = kolaylık yolu (bounded-dispatcher; çok yavaş işleyicide olay DÜŞEBİLİR — `DroppedEvents`).
+- **Zero-loss için `extraSinks` (IEventSink)** geçin: her olay için awaited çağrılır (DÜŞMEZ). DB/dosyaya
+  yazan bir `IEventSink` implement edin (hızlı/async yazın; retry/idempotency `EventId` ile sizde). Örnek:
+```csharp
+class DbSink : IEventSink {
+    public async Task PublishAsync(PlateEvent e, CancellationToken ct) => await _db.UpsertAsync(e.EventId, e, ct);
+}
+var runtime = new AnprRuntime(options, loggerFactory, extraSinks: new[] { new DbSink() });
+```
+
 ## Notlar
 - Web/panel bu pakette YOKTUR (yalnız motor + orkestrasyon). Canlı izleme paneli ayrı serviste kalır.
 - Kameralara yalnız salt-okuma RTSP erişimi gerekir; kamera ayarları değiştirilmez.
