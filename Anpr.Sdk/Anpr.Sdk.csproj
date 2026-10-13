@@ -1,0 +1,118 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Faz 2: ham BGRA→RGBA dönüşümü SIMD ile (VideoFrame.SwizzleBgraToRgba). Yalnız o metotta kullanılır. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- XML doküman: paket tüketicisi (PMS geliştiricisi) IntelliSense'te kontratı görsün.
+         Kod yoğun şekilde belgelenmiş; bu olmadan o belgeler pakette KAYBOLUYORDU. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Belgesiz public üye uyarısı (CS1591) paketi kırmasın; iç tipler zaten belgeli. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- ⛔ CS1570 (bozuk XML belge) HATA'dır, uyarı DEĞİL — 2026-08-06'da ölçüldü:
+         `<0.99` gibi kaçışsız tek bir '<' karakteri, `SnapMaxOcrConfidence` üyesini üretilen
+         XML'den TAMAMEN düşürmüştü. Tüketici (PMS geliştiricisi) IntelliSense'te o ayar için
+         SIFIR belge görüyordu ve derleme yine YEŞİL'di — yani kusur bir uyarı olduğu için
+         yayımlanmayı sürdürdü. Uyarı ile yayımlanabilen bir belge kusuru, belgesizlikle aynıdır. -->
+    <!-- CS1570: bozuk XML (2026-08-06'da bir ÜYEYİ paketten sessizce DÜŞÜRMÜŞTÜ, §P.4 (90)).
+         CS1734: var olmayan parametreye paramref — üye düşmez ama tüketici IntelliSense'te
+         KIRIK referans görür; 2026-08-10'da bir belge bloğunun YANLIŞ METODA bağlı olduğunu
+         bu uyarı ele verdi. Belge kusuru uyarı olarak yayımlanabiliyorsa belgesizlikle aynıdır. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1574;CS1734</WarningsAsErrors>
+    <LangVersion>latest</LangVersion>
+
+    <!-- NuGet paket kimliği: PMS bu paketi (ya da ProjectReference) ekleyip AnprRuntime kullanır.
+         Native bağımlılıklar (ONNX Runtime, SkiaSharp) NuGet üzerinden geldiği için DLL'leri elle
+         kopyalamak yerine paket/proje referansı KULLANILMALIDIR (runtimes/ klasörü kaybolur). -->
+    <PackageId>Anpr.Sdk</PackageId>
+    <!-- ⚠️ Yayımda bu değer KULLANILMAZ: workflow `-p:Version=<etiket>` ile ezer.
+         Ama YEREL derlemede assembly sürümü buradan gelir ve 2026-08-10'a kadar
+         `1.0.0` yazıyordu — oysa son yayın etiketi `v1.0.1`di. Yani yerelde derlenen
+         DLL, yayınlanandan ESKİ bir sürüm numarası taşıyordu. Etiketle hizalandı. -->
+    <!-- 2026-08-10: 1.0.1 → 2.0.0. ⚠️ Anpr.Sdk'nın KENDİ yüzeyi yalnız EKLEMELİ (ölçüldü:
+         PlateEvent +5, AnprServiceOptions +17, KALDIRILAN 0) ve Core tiplerini public
+         imzalarında açığa çıkarmıyor → tek başına olsa `1.1.0` doğru olurdu.
+         Ama publish.yml iki paketi de `-p:Version=<etiket>` ile AYNI sürümde paketliyor
+         (KİLİT ADIM), ve Anpr.Core'da KIRICI değişiklik var → ortak numara en katı kısıta
+         uymak zorunda: 2.0.0. Ayrıntı ve (b) seçeneği için Anpr.Core.csproj'daki nota bakın.
+         YAYIN: 2026-10-13, `nuget-v2.0.0` etiketiyle (sahibinin kararı: nuget.org + MIT). Yayın geri
+         alınamaz; sıradaki sürümde bu sayıyı VE etiketi birlikte artırın (release_readiness.py denetler). -->
+    <Version>2.0.0</Version>
+    <Authors>Erzurum Büyükşehir Belediyesi BİM</Authors>
+    <Company>Erzurum Büyükşehir Belediyesi</Company>
+    <Description>CPU-only Türk plaka tanıma (ANPR): RTSP kamera -> çok-kareli oylama -> plaka olayı. Otopark yazılımına doğrudan gömülebilir çalışma zamanı (AnprRuntime).</Description>
+    <PackageTags>anpr;plate-recognition;turkish-plates;onnx;cpu;rtsp;parking</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/omeeragtoprak/plaka-okuma</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <!-- NuGet galeri sayfasındaki "Project website" bağlantısı. RepositoryUrl'den OTOMATİK
+         türetilmez; yoksa paket sayfası kaynağa bağlantısız kalır. -->
+    <PackageProjectUrl>https://github.com/omeeragtoprak/plaka-okuma</PackageProjectUrl>
+    <!-- LİSANS: MIT (sahibinin kararı, 2026-09-02). Üçüncü taraf modellerin lisansları ayrıdır —
+         THIRD-PARTY-NOTICES.md pakete konur. GPL-3.0 türevi WPOD modeli bu yüzden pakette YOKTUR. -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Erzurum Büyükşehir Belediyesi</Copyright>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+
+    <!-- Symbols + SourceLink (M19): saha çökme yığınları kaynağa çözümlensin. Yalnız pack'i etkiler. -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>portable</DebugType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="..\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Anpr.Core\Anpr.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Anpr.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <!-- Modeller (~22MB) pakete assets/ altında gömülür; tüketicinin çıktı dizinine kopyalamayı
+       build/Anpr.Sdk.targets yapar (contentFiles yolu ikililerde CS2015'e düşebiliyor).
+       ProjectReference tüketicileri için Link+CopyToOutput da burada. Yollar
+       AnprServiceOptions.*ModelPath ile ezilebilir.
+
+       İKİ OCR PROFİLİ (2026-07-29 taşınabilirlik denetimi): paket eskiden YALNIZ Erzurum'a fine-tune
+       edilmiş modeli taşıyordu — genel müşteri farkında olmadan saha-özel bir modelle çalışıyordu
+       (eğitim setinin %70,6'sı tek il; 81 ilin 68'i veride HİÇ yok). Ölçüm (Erzurum'un KENDİ 532
+       etiketli doğrulama kırpıntısı, emit tabanı 0,85):
+         · cct_xs_v2_erz    %78,4 — HIZ profili, mevcut varsayılan (11,3 sn / 532 kırpıntı)
+         · cct_s_v2_global  %84,2 — DOĞRULUK profili, fine-tune EDİLMEMİŞ (44,9 sn = ~4× CPU)
+       Yani saha-özel model kendi sahasında bile en iyisi değil; farkı mimari boyutu açıklıyor.
+       Varsayılan DEĞİŞTİRİLMEDİ: 4× OCR maliyeti hedef zayıf win-x64'te ÖLÇÜLMEDİ. Doğruluk profiline
+       geçmek için OcrModelPath/OcrConfigPath'i cct_s_v2_global.* yapmak yeterlidir. -->
+  <ItemGroup>
+    <None Include="..\models\yolo-v9-t-384-license-plates-end2end.onnx;..\models\cct_xs_v2_erz.onnx;..\models\cct_xs_v2_erz_plate_config.yaml;..\models\cct_s_v2_global.onnx;..\models\cct_s_v2_global_plate_config.yaml;..\models\fsrcnn_x2.onnx"
+          Link="models\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          Pack="true"
+          PackagePath="assets\models\" />
+    <!-- WPOD (rektifikasyon) modeli GPL-3.0 türevidir → PAKETLENMEZ (Pack=false). Yalnız bu depodan
+         ProjectReference ile derleyenlerin (iç kullanım: Anpr.Service) çıktı dizinine kopyalanır.
+         Paket tüketicisinde dosya yoktur; EnhanceRectify aşaması o zaman kendiliğinden kapalı kalır. -->
+    <None Include="..\models\wpod_lpd.onnx"
+          Link="models\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          Pack="false" />
+    <None Include="build\Anpr.Sdk.targets" Pack="true" PackagePath="build\Anpr.Sdk.targets" />
+  </ItemGroup>
+
+</Project>

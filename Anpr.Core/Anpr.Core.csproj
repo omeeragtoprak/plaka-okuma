@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- YUV→RGBA dönüşümü Skia bitmap pikseline doğrudan yazar (Yuv420FrameView.WritablePixels). Yalnız orada kullanılır. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- XML doküman: paket tüketicisi (PMS geliştiricisi) IntelliSense'te kontratı görsün.
+         Kod yoğun şekilde belgelenmiş; bu olmadan o belgeler pakette KAYBOLUYORDU. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Belgesiz public üye uyarısı (CS1591) paketi kırmasın; iç tipler zaten belgeli. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- ⛔ CS1570 (bozuk XML belge) HATA'dır, uyarı DEĞİL — 2026-08-06'da ölçüldü:
+         `<0.99` gibi kaçışsız tek bir '<' karakteri, `SnapMaxOcrConfidence` üyesini üretilen
+         XML'den TAMAMEN düşürmüştü. Tüketici (PMS geliştiricisi) IntelliSense'te o ayar için
+         SIFIR belge görüyordu ve derleme yine YEŞİL'di — yani kusur bir uyarı olduğu için
+         yayımlanmayı sürdürdü. Uyarı ile yayımlanabilen bir belge kusuru, belgesizlikle aynıdır. -->
+    <!-- CS1570: bozuk XML (2026-08-06'da bir ÜYEYİ paketten sessizce DÜŞÜRMÜŞTÜ, §P.4 (90)).
+         CS1734: var olmayan parametreye paramref — üye düşmez ama tüketici IntelliSense'te
+         KIRIK referans görür; 2026-08-10'da bir belge bloğunun YANLIŞ METODA bağlı olduğunu
+         bu uyarı ele verdi. Belge kusuru uyarı olarak yayımlanabiliyorsa belgesizlikle aynıdır. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1574;CS1734</WarningsAsErrors>
+    <LangVersion>latest</LangVersion>
+    <PackageId>Anpr.Core</PackageId>
+    <!-- ⚠️ Yayımda bu değer KULLANILMAZ: workflow `-p:Version=<etiket>` ile ezer.
+         Ama YEREL derlemede assembly sürümü buradan gelir ve 2026-08-10'a kadar
+         `1.0.0` yazıyordu — oysa son yayın etiketi `v1.0.1`di. Yani yerelde derlenen
+         DLL, yayınlanandan ESKİ bir sürüm numarası taşıyordu. Etiketle hizalandı. -->
+    <!-- 2026-08-10: 1.0.1 → 2.0.0 (MAJOR). v1.0.1'den bu yana ÜÇ public üye KALDIRILDI:
+         PlateConfirmer.ApproachMinSamples · PlateConfirmer.ApproachMinSpan · PlateReading.SizeTrend
+         (yerlerini DirectionTracker aldı). Semver: kaldırma → MAJOR.
+         ⚠️ BU DEĞER YAYINDA KULLANILMAZ: publish.yml iki projeyi de `-p:Version=<etiket>` ile
+         AYNI sürümde paketler (kilit adım). Yani gerçek sürümü ETİKET belirler; buradaki değer
+         yerel derleme içindir ve etiketin OLMASI GEREKEN değerini gösterir.
+         🔴 ASIL SONUÇ — KİLİT ADIM SEMVER'İ BOZUYOR: iki paket aynı numarayı almak zorunda
+         olduğu için, `v1.1.0` etiketi atılırsa KIRICI değişiklik içeren Anpr.Core da 1.1.0
+         olarak yayınlanır — yani kırıcı değişiklik MINOR numarayla gider. Core'u doğrudan
+         tüketen biri bunu göremez. İki seçenek var, ikisi de SAHİBİNİN kararı:
+           (a) etiketi `v2.0.0` at → dürüst; Anpr.Sdk için fazla sinyal ama zararsız
+           (b) kaldırılan üç üyeyi [Obsolete] kabuk olarak geri koy → Core da eklemeli olur,
+               `v1.1.0` dürüst hale gelir (ama ölü API geri gelir) -->
+    <Version>2.0.0</Version>
+    <Authors>Erzurum Büyükşehir Belediyesi BİM</Authors>
+    <Company>Erzurum Büyükşehir Belediyesi</Company>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Erzurum Büyükşehir Belediyesi</Copyright>
+    <Description>CPU-only TR ANPR çekirdeği: tespit + OCR + TR gramer + görüntü iyileştirme (SkiaSharp/ONNX).</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>anpr;plate-recognition;turkish-plates;onnx;cpu</PackageTags>
+    <RepositoryUrl>https://github.com/omeeragtoprak/plaka-okuma</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Symbols + SourceLink (M19): sahadaki çökme yığınları kaynağa çözümlenebilsin (snupkg -> nuget.org
+         symbol server; PDB'ler + git kaynak-linkleri). Yalnız pack'i etkiler; build/test'e dokunmaz. -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>portable</DebugType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!-- CPU-only ANPR core. Görüntü işleme: SkiaSharp (MIT lisanslı, ücretsiz; ticari/kamu
+         kullanımına uygun) + ONNX Runtime (CPU). SkiaSharp temel paketi osx-arm64 ve win-x64
+         native binary'lerini içerir; bu Mac'te de Windows hedefte de çalışır.
+         OpenCvSharp KULLANILMADI (arm64-macOS için resmi native runtime yok). -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" />
+    <PackageReference Include="SkiaSharp" Version="2.88.8" />
+    <PackageReference Include="YamlDotNet" Version="16.2.1" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Anpr.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="..\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+</Project>
