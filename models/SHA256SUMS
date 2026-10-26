@@ -1,0 +1,4 @@
+888397b96d761c89db40bc9c305838e8652660f5e282c2cadebbe8d2951a77a8  models/yolo-v9-t-384-license-plates-end2end.onnx
+310333357082fd78c58914a7b5ab742d309bbf6f04dd0be4afc4d59bdaf41feb  models/cct_xs_v2_erz.onnx
+1456fa6c9a72460c8817c7c3f8f7b21402983e1f12dd622ba1b2c3ec36cf6f13  models/wpod_lpd.onnx
+4518217f1898decd457a9b72066f68456c4ff3fb91db852c0d75601fe2ad97de  models/fsrcnn_x2.onnx

@@ -1,0 +1,52 @@
+# Build çıktıları
+bin/
+obj/
+*.user
+
+# GERÇEK kimlik bilgileri içeren config — ASLA commit etme.
+# Şablon için appsettings.example.json kullanın.
+**/appsettings.json
+**/appsettings.Development.json
+**/appsettings.Production.json
+**/appsettings.Local.json
+
+# Rider/VS
+.idea/
+.vs/
+*.suo
+
+# macOS
+.DS_Store
+
+# ffmpeg test/geçici çıktıları
+*.tmp
+frames_debug/
+
+# Benchmark veri setleri (büyük; commit edilmez). labels.json elle saklanabilir.
+dataset/
+bench_out/
+
+# Eğitim ortamı (yeniden kurulabilir: README/finetune-runbook)
+.venv-train/
+publish-win/
+pilot-kit/
+dataset-corrections/
+dist/
+
+# ---- KVKK: kişisel veri içeren ÇALIŞMA ZAMANI çıktıları (konumdan BAĞIMSIZ) ----
+# NEDEN (2026-08-01 denetimi): bu yollar şimdiye kadar YALNIZ `bin/` altında oldukları için
+# korunuyordu — yani koruma TESADÜFİYDİ. Servis başka bir dizinden yayımlanırsa (publish, pilot
+# paketi, elle kopyalanmış kurulum) plaka görüntüleri ve olay kayıtları izlenebilir bir yola düşer.
+# Log'lar ayrıca geçmişte kamera admin ŞİFRESİNİ sızdırmıştı (§P.4 2026-07-28 (7)).
+**/evidence/
+**/dataset-groundtruth/
+**/events.jsonl
+**/ground-truth.jsonl
+**/camera-records.jsonl
+**/corrections.jsonl
+**/logs/
+
+# Python bytecode — check_readme_claims.py artık postgate_report.py'yi import ediyor (2026-08-04)
+__pycache__/
+*.pyc
+absorbed-seen.jsonl

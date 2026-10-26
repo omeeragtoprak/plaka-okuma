@@ -1,0 +1,85 @@
+# NuGet Trusted Publishing — Anpr.Sdk + Anpr.Core'u nuget.org'a (HALKA AÇIK) yayınlar.
+# Kimlik anahtarı YOK: GitHub OIDC token'ı nuget.org'a gönderilir, karşılığında 1 saatlik
+# geçici anahtar alınır (NuGet/login). Bunun çalışması için nuget.org'da Trusted Publishing
+# politikası tanımlı olmalı (Repository Owner=omeeragtoprak, Repository=plaka-okuma,
+# Workflow File=publish.yml). Depo PRIVATE olabilir; paket halka açıktır.
+
+name: publish
+
+# ── TETİK ────────────────────────────────────────────────────────────────────────────────
+# 2026-08-21: `v*.*.*` etiket tetiği KAPATILDI — o gün karar "iç kullanım"dı ve sıradan bir
+#             `git tag v1.2.3` iki paketi de kazara herkese açık yayınlardı (geri alınamaz:
+#             nuget.org'da sürüm silinmez, yalnız listeden kaldırılır).
+# 2026-09-30: sahibinin kararı değişti → nuget.org'da halka açık yayın + MIT lisansı.
+#             Tetik GERİ AÇILDI ama AYRI bir etiket adıyla: `nuget-vX.Y.Z`.
+#             · sıradan `v*` etiketleri hâlâ HİÇBİR ŞEY yayınlamaz (08-21 korumasının amacı duruyor)
+#             · yayın, adı "nuget-" ile başlayan bilinçli bir etiketle ya da elle (Run workflow) yapılır
+#             ⚠️ Yayın GERİ ALINAMAZ. Etiketi atmadan önce yerelde:
+#                python3 scripts/release_readiness.py && python3 scripts/audit_package_kvkk.py
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Yayınlanacak sürüm (ör. 2.0.0)'
+        required: true
+  push:
+    tags: [ 'nuget-v*.*.*' ]
+
+permissions:
+  id-token: write   # OIDC token üretimi (Trusted Publishing için ZORUNLU)
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Sürümü belirle (etiket ya da elle girdi)
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#nuget-v}"   # nuget-v2.0.0 -> 2.0.0
+          fi
+          # Sürüm biçimi sağlaması: yanlış adlı bir etiket "nuget-v2.0.0-deneme" gibi bir şeyi yayınlamasın.
+          if ! echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::geçersiz sürüm '$V'"; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Yayınlanacak sürüm: $V"
+
+      - name: KVKK + lisans kapısı (kaynak) — pakete girecek metinlerde gerçek plaka olmamalı
+        run: python3 scripts/audit_package_kvkk.py
+
+      - name: Testler
+        run: dotnet test OtoparkAnpr.sln -c Release --nologo
+
+      - name: Paketle (Anpr.Core + Anpr.Sdk, aynı sürüm)
+        run: |
+          dotnet pack Anpr.Core/Anpr.Core.csproj -c Release -o dist -p:Version=${{ steps.ver.outputs.version }}
+          dotnet pack Anpr.Sdk/Anpr.Sdk.csproj  -c Release -o dist -p:Version=${{ steps.ver.outputs.version }}
+          ls -lh dist
+
+      - name: KVKK + lisans kapısı (paket) — yayınlanacak DOSYANIN kendisi denetlenir
+        run: python3 scripts/audit_package_kvkk.py --nupkg dist/*.nupkg
+
+      - name: NuGet login (OIDC -> 1 saatlik geçici anahtar)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          # nuget.org PROFİL ADI (e-posta değil). Repo değişkeni yoksa omeeragtoprak kullanılır.
+          user: ${{ vars.NUGET_USER || 'omeeragtoprak' }}
+
+      - name: Yayınla (nuget.org)
+        run: >
+          dotnet nuget push "dist/*.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
