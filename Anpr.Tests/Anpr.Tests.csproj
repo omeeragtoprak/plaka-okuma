@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Anpr.Core\Anpr.Core.csproj" />
+    <ProjectReference Include="..\Anpr.Service\Anpr.Service.csproj" />
+    <PackageReference Include="SkiaSharp" Version="2.88.8" />
+    <!-- Linux CI (GitHub Actions ubuntu runner): SkiaSharp native + fontconfig'siz varyant, yoksa
+         uçtan-uca test 'libSkiaSharp bulunamadı' ile patlar. Linux dışında atıl; test paketlenmiyor. -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="2.88.8" />
+  </ItemGroup>
+
+  <!-- Models + a sample car image for the end-to-end recognition test. -->
+  <ItemGroup>
+    <None Include="..\models\*.onnx;..\models\*.yaml;..\models\sample_car.jpg"
+          Link="models\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
